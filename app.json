@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "term",
-    "slug": "term",
+    "name": "InkPad Lab",
+    "slug": "inkpad-lab",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
