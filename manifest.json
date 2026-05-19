@@ -1,0 +1,9 @@
+{
+  "name": "StudyFlow Notes",
+  "short_name": "StudyFlow",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eef2f6",
+  "theme_color": "#2563eb",
+  "description": "Goodnotes style note-taking prototype for scientific management term project"
+}

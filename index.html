@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StudyFlow Notes</title>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <aside class="library">
+        <div class="brand">
+          <span class="brand-mark">S</span>
+          <div>
+            <strong>StudyFlow</strong>
+            <small>Goodnotes style prototype</small>
+          </div>
+        </div>
+
+        <button class="new-notebook" id="newNotebookBtn">+ 새 노트</button>
+
+        <nav class="notebook-list" aria-label="노트북 목록">
+          <button class="notebook active">
+            <span class="cover blue"></span>
+            <span>
+              <strong>과학적 관리 필기</strong>
+              <small>강의 구조화 템플릿</small>
+            </span>
+          </button>
+          <button class="notebook">
+            <span class="cover green"></span>
+            <span>
+              <strong>공업수학</strong>
+              <small>그래프/공식 중심</small>
+            </span>
+          </button>
+          <button class="notebook">
+            <span class="cover coral"></span>
+            <span>
+              <strong>물리 실험</strong>
+              <small>표/결과 정리</small>
+            </span>
+          </button>
+        </nav>
+      </aside>
+
+      <section class="note-app">
+        <header class="document-tabs">
+          <button class="tab active">과학적 관리 필기</button>
+          <button class="tab">강의자료.pdf</button>
+          <button class="tab plus" id="addDocTabBtn">+</button>
+          <div class="tab-spacer"></div>
+          <button class="icon-button" id="exportBtn" title="PNG로 내보내기">⇩</button>
+          <button class="icon-button" id="fullscreenBtn" title="앱 화면 집중">⛶</button>
+        </header>
+
+        <header class="toolbar" aria-label="필기 도구">
+          <div class="tool-set">
+            <button class="tool active" data-tool="pen" title="펜">✎</button>
+            <button class="tool" data-tool="highlighter" title="형광펜">▰</button>
+            <button class="tool" data-tool="eraser" title="지우개">⌫</button>
+            <button class="tool" data-tool="lasso" title="올가미 선택">◌</button>
+            <button class="tool" data-tool="text" title="텍스트">T</button>
+            <button class="tool" id="quickToggleBtn" title="펜/지우개 빠른 전환">⇄</button>
+            <button class="tool" id="undoBtn" title="실행 취소">↶</button>
+          </div>
+
+          <div class="tool-options">
+            <div class="swatches" aria-label="색상">
+              <button class="swatch active" data-color="#1f2937" style="--swatch:#1f2937" title="검정"></button>
+              <button class="swatch" data-color="#db2777" style="--swatch:#db2777" title="분홍"></button>
+              <button class="swatch" data-color="#2563eb" style="--swatch:#2563eb" title="파랑"></button>
+              <button class="swatch" data-color="#16a34a" style="--swatch:#16a34a" title="초록"></button>
+              <button class="swatch" data-color="#facc15" style="--swatch:#facc15" title="노랑"></button>
+            </div>
+
+            <label class="range-control">
+              <span>펜</span>
+              <input id="penSize" type="range" min="1" max="18" value="4" />
+              <strong id="penSizeValue">4</strong>
+            </label>
+
+            <label class="range-control">
+              <span>지우개</span>
+              <input id="eraserSize" type="range" min="8" max="96" value="34" />
+              <strong id="eraserSizeValue">34</strong>
+            </label>
+
+            <label class="range-control">
+              <span>확대</span>
+              <input id="zoomRange" type="range" min="75" max="220" value="100" />
+              <strong id="zoomValue">100%</strong>
+            </label>
+          </div>
+        </header>
+
+        <div class="main-workspace">
+          <aside class="page-strip" aria-label="페이지 목록">
+            <button class="page-thumb active" data-page="0">
+              <span>1</span>
+              <em>강의</em>
+            </button>
+            <button class="page-thumb" data-page="1">
+              <span>2</span>
+              <em>풀이</em>
+            </button>
+            <button class="page-thumb" data-page="2">
+              <span>3</span>
+              <em>실험</em>
+            </button>
+            <button class="add-page" id="addPageBtn">+ 페이지</button>
+          </aside>
+
+          <section class="paper-stage" id="paperStage">
+            <canvas id="noteCanvas" aria-label="필기 페이지"></canvas>
+            <input id="textComposer" class="text-composer" type="text" placeholder="텍스트 입력" />
+            <div id="selectionBox" class="selection-box" hidden></div>
+          </section>
+
+          <aside class="inspector">
+            <section class="panel">
+              <h2>템플릿</h2>
+              <div class="segmented">
+                <button class="active" data-template="lecture">강의</button>
+                <button data-template="problem">풀이</button>
+                <button data-template="lab">실험</button>
+                <button data-template="blank">빈 종이</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>이과 도형 요소</h2>
+              <div class="element-grid">
+                <button data-element="axis">좌표축</button>
+                <button data-element="normal">정규분포</button>
+                <button data-element="sine">사인파</button>
+                <button data-element="parabola">포물선</button>
+                <button data-element="circuit">회로</button>
+                <button data-element="vector">벡터</button>
+                <button data-element="matrix">행렬</button>
+                <button data-element="molecule">분자</button>
+                <button data-element="table">표</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>자료 삽입</h2>
+              <label class="file-drop">
+                강의자료 이미지 추가
+                <input id="imageUpload" type="file" accept="image/*" multiple />
+              </label>
+              <div id="assetTray" class="asset-tray">
+                <p>그래프, 표, PDF 캡처 이미지를 보관했다가 클릭해 삽입합니다.</p>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>휴식 최적화</h2>
+              <div class="break-card">
+                <strong id="breakStatus">25:00</strong>
+                <span id="breakHint">집중 필기 구간</span>
+              </div>
+              <div class="mini-actions">
+                <button id="startBreakBtn">시작</button>
+                <button id="pauseBreakBtn">정지</button>
+                <button id="resetBreakBtn">초기화</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>작업 기록</h2>
+              <div class="metrics">
+                <div><span>도구 전환</span><strong id="toolSwitches">0</strong></div>
+                <div><span>색 변경</span><strong id="colorSwitches">0</strong></div>
+                <div><span>두께 변경</span><strong id="sizeSwitches">0</strong></div>
+                <div><span>도형 삽입</span><strong id="elementCount">0</strong></div>
+                <div><span>올가미</span><strong id="lassoCount">0</strong></div>
+                <div><span>확대 제스처</span><strong id="zoomGestures">0</strong></div>
+                <div><span>휴식 횟수</span><strong id="breakCount">0</strong></div>
+                <div><span>경과</span><strong id="elapsed">00:00</strong></div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
