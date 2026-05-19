@@ -31,22 +31,22 @@
 
       <header class="toolbar" aria-label="필기 도구">
         <div class="left-tools">
-          <button class="icon-button" title="사이드바">☰</button>
+          <button class="icon-button" title="페이지">▤</button>
           <button class="icon-button" title="검색">⌕</button>
           <button class="icon-button" id="undoBtn" title="실행 취소">↶</button>
           <button class="icon-button" title="다시 실행">↷</button>
         </div>
 
         <div class="center-tools">
-          <button class="tool active" data-tool="pen" title="펜">✎</button>
-          <button class="tool" data-tool="highlighter" title="형광펜">▰</button>
-          <button class="tool" data-tool="eraser" title="지우개">⌫</button>
-          <button class="tool" data-tool="lasso" title="올가미">◌</button>
-          <button class="tool" data-tool="text" title="텍스트">T</button>
-          <button class="tool" id="quickToggleBtn" title="펜/지우개 빠른 전환">⇄</button>
-          <button class="tool drawer-toggle" data-drawer="elements" title="요소">◇</button>
-          <button class="tool drawer-toggle" data-drawer="assets" title="이미지">▧</button>
-          <button class="tool" title="마이크">●</button>
+          <button class="tool active" data-tool="pen" title="펜"><span>✎</span><small>펜</small></button>
+          <button class="tool" data-tool="highlighter" title="형광펜"><span>▰</span><small>형광</small></button>
+          <button class="tool" data-tool="eraser" title="지우개"><span>⌫</span><small>지우개</small></button>
+          <button class="tool" data-tool="lasso" title="올가미"><span>◌</span><small>올가미</small></button>
+          <button class="tool" data-tool="text" title="텍스트"><span>T</span><small>텍스트</small></button>
+          <button class="tool" id="quickToggleBtn" title="펜/지우개 빠른 전환"><span>⇄</span><small>전환</small></button>
+          <button class="tool drawer-toggle" data-drawer="elements" title="요소"><span>◇</span><small>요소</small></button>
+          <button class="tool drawer-toggle" data-drawer="assets" title="이미지"><span>▧</span><small>이미지</small></button>
+          <button class="tool" title="녹음"><span>●</span><small>녹음</small></button>
         </div>
 
         <div class="right-tools">
@@ -112,12 +112,10 @@
         </div>
         <div class="element-grid">
           <button data-element="axis">좌표축</button>
-          <button data-element="normal">정규분포</button>
-          <button data-element="sine">사인파</button>
-          <button data-element="parabola">포물선</button>
+          <button data-element="distribution">분포</button>
+          <button data-element="function">함수</button>
           <button data-element="vector">벡터</button>
           <button data-element="matrix">행렬</button>
-          <button data-element="molecule">분자</button>
           <button data-element="table">표</button>
         </div>
         <div class="element-editor">
@@ -125,11 +123,11 @@
             <strong id="elementEditorTitle">요소 조정</strong>
             <small>요소를 길게 누르면 세부 조정</small>
           </div>
-          <label>
+          <label data-control="length">
             <span>길이</span>
             <input id="elementLength" type="range" min="80" max="300" value="190" />
           </label>
-          <label>
+          <label data-control="direction">
             <span>방향</span>
             <select id="elementDirection">
               <option value="right">오른쪽</option>
@@ -139,7 +137,7 @@
               <option value="diag">대각선</option>
             </select>
           </label>
-          <label>
+          <label data-control="axis">
             <span>축</span>
             <select id="axisDimension">
               <option value="1">1차원</option>
@@ -147,11 +145,25 @@
               <option value="3">3차원</option>
             </select>
           </label>
-          <label>
+          <label data-control="distribution">
+            <span>분포</span>
+            <select id="distributionType">
+              <option value="normal">정규</option>
+              <option value="uniform">균등</option>
+              <option value="exponential">지수</option>
+              <option value="bimodal">쌍봉</option>
+              <option value="skewed">우편향</option>
+            </select>
+          </label>
+          <label data-control="function">
+            <span>수식</span>
+            <input id="functionExpr" type="text" value="sin(x)" />
+          </label>
+          <label data-control="color">
             <span>색상</span>
             <input id="elementColor" type="color" value="#1f2937" />
           </label>
-          <div class="table-controls">
+          <div class="table-controls" data-control="grid">
             <label>
               <span>행</span>
               <input id="tableRows" type="number" min="1" max="8" value="3" />

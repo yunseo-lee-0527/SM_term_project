@@ -73,6 +73,8 @@ const ui = {
   tableCols: document.getElementById("tableCols"),
   axisDimension: document.getElementById("axisDimension"),
   elementColor: document.getElementById("elementColor"),
+  distributionType: document.getElementById("distributionType"),
+  functionExpr: document.getElementById("functionExpr"),
 };
 
 function setupCanvas() {
@@ -181,20 +183,34 @@ function setZoom(nextZoom, countGesture = true) {
 function setSelectedElement(type) {
   state.selectedElement = type;
   ui.elementEditorTitle.textContent = `${elementLabel(type)} 조정`;
+  updateElementEditorControls(type);
 }
 
 function elementLabel(type) {
   const labels = {
     axis: "좌표축",
-    normal: "정규분포",
-    sine: "사인파",
-    parabola: "포물선",
+    distribution: "분포",
+    function: "함수",
     vector: "벡터",
     matrix: "행렬",
-    molecule: "분자",
     table: "표",
   };
   return labels[type] || "요소";
+}
+
+function updateElementEditorControls(type) {
+  const visible = {
+    axis: ["length", "axis", "color"],
+    distribution: ["length", "distribution", "color"],
+    function: ["length", "function", "color"],
+    vector: ["color"],
+    matrix: ["grid", "color"],
+    table: ["length", "grid", "color"],
+  }[type] || ["color"];
+
+  document.querySelectorAll("[data-control]").forEach((control) => {
+    control.hidden = !visible.includes(control.dataset.control);
+  });
 }
 
 function selectElementNode(node) {
@@ -217,6 +233,8 @@ function syncEditorFromNode(node) {
   ui.tableCols.value = node.dataset.cols || 3;
   ui.axisDimension.value = node.dataset.dimension || 2;
   ui.elementColor.value = node.dataset.color || "#1f2937";
+  ui.distributionType.value = node.dataset.distribution || "normal";
+  ui.functionExpr.value = node.dataset.expr || "sin(x)";
 }
 
 function pointerDistance() {
@@ -438,14 +456,7 @@ document.querySelectorAll("[data-element]").forEach((button) => {
 });
 
 document.getElementById("insertCustomElementBtn").addEventListener("click", () => {
-  const props = {
-    length: Number(ui.elementLength.value),
-    direction: ui.elementDirection.value,
-    rows: Number(ui.tableRows.value),
-    cols: Number(ui.tableCols.value),
-    dimension: Number(ui.axisDimension.value),
-    color: ui.elementColor.value,
-  };
+  const props = currentElementProps();
 
   if (state.selectedElementNode) {
     applyElementProps(state.selectedElementNode, props);
@@ -456,6 +467,26 @@ document.getElementById("insertCustomElementBtn").addEventListener("click", () =
   updateMetrics();
   saveCurrentPage();
 });
+
+[ui.elementLength, ui.elementDirection, ui.tableRows, ui.tableCols, ui.axisDimension, ui.elementColor, ui.distributionType, ui.functionExpr].forEach((input) => {
+  input.addEventListener("input", () => {
+    if (!state.selectedElementNode) return;
+    applyElementProps(state.selectedElementNode, currentElementProps());
+  });
+});
+
+function currentElementProps() {
+  return {
+    length: Number(ui.elementLength.value),
+    direction: ui.elementDirection.value,
+    rows: Number(ui.tableRows.value),
+    cols: Number(ui.tableCols.value),
+    dimension: Number(ui.axisDimension.value),
+    color: ui.elementColor.value,
+    distribution: ui.distributionType.value,
+    expr: ui.functionExpr.value,
+  };
+}
 
 document.querySelectorAll(".page-thumb").forEach((button) => {
   button.addEventListener("click", () => {
@@ -546,6 +577,16 @@ document.getElementById("startBreakBtn").addEventListener("click", () => {
   }, 1000);
 });
 
+ui.breakStatus.addEventListener("dblclick", () => {
+  const minutes = Number(prompt("휴식 타이머 시간을 분 단위로 입력하세요.", String(Math.max(1, Math.round(state.breakSeconds / 60)))));
+  if (!Number.isFinite(minutes) || minutes <= 0) return;
+  clearInterval(state.breakTimer);
+  state.breakTimer = null;
+  state.breakSeconds = Math.round(minutes * 60);
+  ui.breakHint.textContent = "사용자 설정 집중 구간";
+  updateBreakStatus();
+});
+
 document.getElementById("pauseBreakBtn").addEventListener("click", () => {
   clearInterval(state.breakTimer);
   state.breakTimer = null;
@@ -612,6 +653,12 @@ function createEditableElement(type, options = {}) {
     cols: Number(ui.tableCols.value) || 3,
     dimension: Number(ui.axisDimension.value) || 2,
     color: ui.elementColor.value || "#1f2937",
+    distribution: ui.distributionType.value || "normal",
+    expr: ui.functionExpr.value || "sin(x)",
+    x1: 44,
+    y1: 138,
+    x2: 226,
+    y2: 62,
     ...options,
   };
   const node = document.createElement("div");
@@ -674,6 +721,12 @@ function renderEditableElement(node) {
     cols: Number(node.dataset.cols) || 3,
     dimension: Number(node.dataset.dimension) || 2,
     color: node.dataset.color || "#1f2937",
+    distribution: node.dataset.distribution || "normal",
+    expr: node.dataset.expr || "sin(x)",
+    x1: Number(node.dataset.x1) || 44,
+    y1: Number(node.dataset.y1) || 138,
+    x2: Number(node.dataset.x2) || 226,
+    y2: Number(node.dataset.y2) || 62,
   };
   node.innerHTML = elementSvg(type, props);
 }
@@ -683,33 +736,19 @@ function elementSvg(type, props) {
   if (type === "table") return tableSvg(props);
   if (type === "matrix") return matrixSvg(props);
   if (type === "axis") return axisSvg(props);
-  if (type === "normal") return normalSvg(props);
-  if (type === "sine") return sineSvg(props);
-  if (type === "parabola") return parabolaSvg(props);
-  if (type === "molecule") return moleculeSvg(props);
+  if (type === "distribution") return distributionSvg(props);
+  if (type === "function") return functionSvg(props);
   return vectorSvg(props);
 }
 
 function vectorGeometry(props) {
-  const length = props.length || 190;
-  const vectors = {
-    right: [length, 0],
-    left: [-length, 0],
-    up: [0, -length],
-    down: [0, length],
-    diag: [length * 0.82, -length * 0.46],
-  };
-  const [dx, dy] = vectors[props.direction] || vectors.right;
-  const pad = 26;
-  const minX = Math.min(0, dx);
-  const minY = Math.min(0, dy);
   return {
-    sx: pad - minX,
-    sy: pad - minY,
-    ex: pad - minX + dx,
-    ey: pad - minY + dy,
-    width: Math.abs(dx) + pad * 2,
-    height: Math.abs(dy) + pad * 2,
+    sx: props.x1,
+    sy: props.y1,
+    ex: props.x2,
+    ey: props.y2,
+    width: 290,
+    height: 190,
   };
 }
 
@@ -767,42 +806,86 @@ function axisSvg(props) {
   </svg>`;
 }
 
-function normalSvg(props) {
+function distributionSvg(props) {
   const length = props.length || 220;
   const points = [];
   for (let i = 0; i <= length; i += 5) {
-    const t = (i - length / 2) / (length / 6.4);
-    points.push(`${i},${86 - Math.exp(-0.5 * t * t) * 70}`);
+    const x = i / length;
+    const y = distributionY(x, props.distribution);
+    points.push(`${i},${90 - y * 74}`);
   }
-  return `<svg width="${length}" height="100" viewBox="0 0 ${length} 100"><polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/></svg>`;
+  return `<svg width="${length}" height="108" viewBox="0 0 ${length} 108">
+    <line x1="0" y1="92" x2="${length}" y2="92" stroke="${props.color}" stroke-width="2" opacity="0.4"/>
+    <polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/>
+    <text x="6" y="18" fill="${props.color}" font-size="14">${distributionLabel(props.distribution)}</text>
+  </svg>`;
 }
 
-function sineSvg(props) {
+function distributionY(x, type) {
+  if (type === "uniform") return 0.62;
+  if (type === "exponential") return Math.exp(-4 * x);
+  if (type === "bimodal") return 0.9 * Math.exp(-90 * (x - 0.32) ** 2) + 0.75 * Math.exp(-90 * (x - 0.72) ** 2);
+  if (type === "skewed") return 1.25 * Math.pow(x, 2.2) * Math.exp(-2.8 * x) * 5;
+  return Math.exp(-0.5 * ((x - 0.5) / 0.17) ** 2);
+}
+
+function distributionLabel(type) {
+  return {
+    normal: "Normal",
+    uniform: "Uniform",
+    exponential: "Exponential",
+    bimodal: "Bimodal",
+    skewed: "Skewed",
+  }[type] || "Distribution";
+}
+
+function functionSvg(props) {
   const length = props.length || 220;
   const points = [];
-  for (let i = 0; i <= length; i += 5) points.push(`${i},${50 + Math.sin(i / 18) * 30}`);
-  return `<svg width="${length}" height="100" viewBox="0 0 ${length} 100"><polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/></svg>`;
-}
-
-function parabolaSvg(props) {
-  const length = props.length || 190;
-  const points = [];
-  const half = length / 2;
-  for (let i = -half; i <= half; i += 5) points.push(`${half + i},${96 - (i * i) / (length * 0.58)}`);
-  return `<svg width="${length}" height="105" viewBox="0 0 ${length} 105"><polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/></svg>`;
-}
-
-function moleculeSvg(props) {
-  return `<svg width="190" height="120" viewBox="0 0 190 120">
-    <g stroke="${props.color}" stroke-width="3" fill="none"><path d="M45 58 L95 26 L145 58 L95 92 Z"/></g>
-    <g fill="#fff" stroke="${props.color}" stroke-width="3"><circle cx="45" cy="58" r="11"/><circle cx="95" cy="26" r="11"/><circle cx="145" cy="58" r="11"/><circle cx="95" cy="92" r="11"/></g>
+  const fn = compileFunction(props.expr);
+  for (let px = 0; px <= length; px += 4) {
+    const x = (px / length) * 8 - 4;
+    let rawY = 0;
+    try {
+      rawY = fn(x);
+    } catch {
+      rawY = Math.sin(x);
+    }
+    if (!Number.isFinite(rawY)) continue;
+    const y = 80 - Math.max(-3.2, Math.min(3.2, rawY)) * 18;
+    points.push(`${px},${y}`);
+  }
+  return `<svg width="${length}" height="150" viewBox="0 0 ${length} 150">
+    <g stroke="${props.color}" opacity="0.35"><line x1="0" y1="80" x2="${length}" y2="80"/><line x1="${length / 2}" y1="8" x2="${length / 2}" y2="142"/></g>
+    <polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/>
+    <text x="6" y="18" fill="${props.color}" font-size="14">y=${escapeHtml(props.expr)}</text>
   </svg>`;
+}
+
+function compileFunction(expr) {
+  const normalized = String(expr || "sin(x)")
+    .replace(/Math\./g, "")
+    .replace(/\^/g, "**")
+    .replace(/\b(sin|cos|tan|sqrt|abs|log|exp|pow|min|max)\b/g, "Math.$1")
+    .replace(/\bpi\b/gi, "Math.PI")
+    .replace(/\be\b/g, "Math.E");
+  try {
+    return Function("x", `"use strict"; return (${normalized});`);
+  } catch {
+    return (x) => Math.sin(x);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char]);
 }
 
 function addVectorHandles(node) {
   const props = {
-    length: Number(node.dataset.length) || 190,
-    direction: node.dataset.direction || "right",
+    x1: Number(node.dataset.x1) || 44,
+    y1: Number(node.dataset.y1) || 138,
+    x2: Number(node.dataset.x2) || 226,
+    y2: Number(node.dataset.y2) || 62,
     color: node.dataset.color || "#1f2937",
   };
   const g = vectorGeometry(props);
@@ -825,17 +908,19 @@ function startVectorHandleDrag(event, node, kind) {
   event.stopPropagation();
   const startX = event.clientX;
   const startY = event.clientY;
-  const startLength = Number(node.dataset.length) || 190;
-  const startLeft = parseFloat(node.style.left) || 0;
-  const startTop = parseFloat(node.style.top) || 0;
+  const startXValue = Number(node.dataset[`${kind === "start" ? "x1" : "x2"}`]) || 0;
+  const startYValue = Number(node.dataset[`${kind === "start" ? "y1" : "y2"}`]) || 0;
   const move = (moveEvent) => {
     const dx = (moveEvent.clientX - startX) / state.zoom;
     const dy = (moveEvent.clientY - startY) / state.zoom;
-    const delta = Math.max(Math.abs(dx), Math.abs(dy));
-    node.dataset.length = String(Math.max(60, Math.min(320, startLength + delta)));
+    const nextX = Math.max(12, Math.min(278, startXValue + dx));
+    const nextY = Math.max(12, Math.min(178, startYValue + dy));
     if (kind === "start") {
-      node.style.left = `${startLeft + dx}px`;
-      node.style.top = `${startTop + dy}px`;
+      node.dataset.x1 = String(nextX);
+      node.dataset.y1 = String(nextY);
+    } else {
+      node.dataset.x2 = String(nextX);
+      node.dataset.y2 = String(nextY);
     }
     renderEditableElement(node);
     addVectorHandles(node);
@@ -847,150 +932,6 @@ function startVectorHandleDrag(event, node, kind) {
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
-}
-
-function drawElement(type, options = {}) {
-  const x = 585;
-  const y = 86 + (state.metrics.elementCount % 8) * 118;
-  const opts = {
-    length: 190,
-    direction: "right",
-    rows: 3,
-    cols: 3,
-    ...options,
-  };
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.strokeStyle = "#1f2937";
-  ctx.fillStyle = "#1f2937";
-  ctx.lineWidth = 2.6;
-  ctx.font = "18px Arial";
-  ctx.setLineDash([]);
-
-  if (type === "axis") drawAxis(x, y, opts);
-  if (type === "normal") drawNormal(x, y, opts);
-  if (type === "sine") drawSine(x, y, opts);
-  if (type === "parabola") drawParabola(x, y, opts);
-  if (type === "vector") drawVector(x, y, opts);
-  if (type === "matrix") drawMatrix(x, y);
-  if (type === "molecule") drawMolecule(x, y);
-  if (type === "table") drawTable(x, y, opts);
-
-  ctx.restore();
-}
-
-function drawAxis(x, y, opts = {}) {
-  const length = opts.length || 232;
-  ctx.beginPath();
-  ctx.moveTo(x, y + 96);
-  ctx.lineTo(x + length, y + 96);
-  ctx.moveTo(x + 24, y + 112);
-  ctx.lineTo(x + 24, y);
-  ctx.stroke();
-  ctx.fillText("x", x + length - 14, y + 116);
-  ctx.fillText("y", x + 4, y + 18);
-}
-
-function drawNormal(x, y, opts = {}) {
-  const length = opts.length || 230;
-  ctx.beginPath();
-  ctx.moveTo(x, y + 88);
-  for (let i = 0; i <= length; i += 4) {
-    const t = (i - length / 2) / (length / 6.4);
-    ctx.lineTo(x + i, y + 88 - Math.exp(-0.5 * t * t) * 78);
-  }
-  ctx.stroke();
-}
-
-function drawSine(x, y, opts = {}) {
-  const length = opts.length || 230;
-  ctx.beginPath();
-  for (let i = 0; i <= length; i += 4) {
-    const waveY = y + 54 + Math.sin(i / 19) * 32;
-    if (i === 0) ctx.moveTo(x + i, waveY);
-    else ctx.lineTo(x + i, waveY);
-  }
-  ctx.stroke();
-}
-
-function drawParabola(x, y, opts = {}) {
-  const length = opts.length || 188;
-  const half = length / 2;
-  ctx.beginPath();
-  for (let i = -half; i <= half; i += 4) {
-    const curveY = y + 100 - (i * i) / (length * 0.58);
-    if (i === -half) ctx.moveTo(x + 116 + i, curveY);
-    else ctx.lineTo(x + 116 + i, curveY);
-  }
-  ctx.stroke();
-}
-
-function drawVector(x, y, opts = {}) {
-  const length = opts.length || 190;
-  const direction = opts.direction || "right";
-  const vectors = {
-    right: [length, 0],
-    left: [-length, 0],
-    up: [0, -length],
-    down: [0, length],
-    diag: [length * 0.82, -length * 0.46],
-  };
-  const [dx, dy] = vectors[direction] || vectors.right;
-  const startX = direction === "left" ? x + 212 : x + 22;
-  const startY = direction === "up" ? y + 106 : y + 58;
-  const endX = startX + dx;
-  const endY = startY + dy;
-  const angle = Math.atan2(dy, dx);
-  const head = 15;
-  ctx.beginPath();
-  ctx.moveTo(startX, startY);
-  ctx.lineTo(endX, endY);
-  ctx.lineTo(endX - head * Math.cos(angle - 0.55), endY - head * Math.sin(angle - 0.55));
-  ctx.moveTo(endX, endY);
-  ctx.lineTo(endX - head * Math.cos(angle + 0.55), endY - head * Math.sin(angle + 0.55));
-  ctx.stroke();
-  ctx.fillText("v", (startX + endX) / 2 + 6, (startY + endY) / 2 - 8);
-}
-
-function drawMatrix(x, y) {
-  ctx.fillText("[  a    b  ]", x + 26, y + 44);
-  ctx.fillText("[  c    d  ]", x + 26, y + 76);
-}
-
-function drawMolecule(x, y) {
-  const atoms = [[54, 56], [108, 28], [162, 56], [108, 88]];
-  ctx.beginPath();
-  ctx.moveTo(x + 54, y + 56);
-  ctx.lineTo(x + 108, y + 28);
-  ctx.lineTo(x + 162, y + 56);
-  ctx.lineTo(x + 108, y + 88);
-  ctx.closePath();
-  ctx.stroke();
-  atoms.forEach(([dx, dy]) => {
-    ctx.beginPath();
-    ctx.arc(x + dx, y + dy, 11, 0, Math.PI * 2);
-    ctx.stroke();
-  });
-}
-
-function drawTable(x, y, opts = {}) {
-  const rows = Math.max(1, Math.min(8, opts.rows || 3));
-  const cols = Math.max(1, Math.min(8, opts.cols || 3));
-  const width = opts.length || 230;
-  const height = Math.max(58, rows * 28);
-  ctx.strokeRect(x, y, width, height);
-  for (let i = 1; i < rows; i += 1) {
-    ctx.beginPath();
-    ctx.moveTo(x, y + (height / rows) * i);
-    ctx.lineTo(x + width, y + (height / rows) * i);
-    ctx.stroke();
-  }
-  for (let i = 1; i < cols; i += 1) {
-    ctx.beginPath();
-    ctx.moveTo(x + (width / cols) * i, y);
-    ctx.lineTo(x + (width / cols) * i, y + height);
-    ctx.stroke();
-  }
 }
 
 function readFileAsDataUrl(file) {
