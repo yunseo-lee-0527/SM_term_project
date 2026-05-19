@@ -309,6 +309,46 @@ button {
   transform-origin: top center;
 }
 
+.element-layer {
+  position: absolute;
+  z-index: 2;
+  top: 70px;
+  left: 50%;
+  width: 820px;
+  height: 1105px;
+  pointer-events: none;
+  transform: translateX(-50%) scale(1);
+  transform-origin: top center;
+}
+
+.note-element {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.note-element svg {
+  display: block;
+  overflow: visible;
+}
+
+.note-element.selected {
+  outline: 2px dashed var(--blue);
+  outline-offset: 8px;
+}
+
+.drag-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 2px 7px rgba(31, 41, 55, 0.25);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+}
+
 .text-composer {
   position: absolute;
   z-index: 4;
@@ -407,6 +447,10 @@ button {
   border-radius: 8px;
   padding: 0 8px;
   background: #fff;
+}
+
+.element-editor input[type="color"] {
+  padding: 2px;
 }
 
 .element-editor input[type="range"] {

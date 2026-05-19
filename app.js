@@ -1,6 +1,7 @@
 const canvas = document.getElementById("noteCanvas");
 const ctx = canvas.getContext("2d");
 const stage = document.getElementById("paperStage");
+const elementLayer = document.getElementById("elementLayer");
 const selectionBox = document.getElementById("selectionBox");
 const textComposer = document.getElementById("textComposer");
 
@@ -22,6 +23,7 @@ const state = {
   pinchStartDistance: 0,
   pinchStartZoom: 1,
   selectedElement: "vector",
+  selectedElementNode: null,
   longPressTimer: null,
   longPressFired: false,
   history: [],
@@ -69,6 +71,8 @@ const ui = {
   elementDirection: document.getElementById("elementDirection"),
   tableRows: document.getElementById("tableRows"),
   tableCols: document.getElementById("tableCols"),
+  axisDimension: document.getElementById("axisDimension"),
+  elementColor: document.getElementById("elementColor"),
 };
 
 function setupCanvas() {
@@ -110,6 +114,13 @@ function loadPage(pageIndex) {
   }
   document.querySelectorAll(".page-thumb").forEach((thumb) => {
     thumb.classList.toggle("active", Number(thumb.dataset.page) === pageIndex);
+  });
+  updateElementVisibility();
+}
+
+function updateElementVisibility() {
+  elementLayer.querySelectorAll(".note-element").forEach((node) => {
+    node.hidden = Number(node.dataset.page) !== state.page;
   });
 }
 
@@ -158,7 +169,9 @@ function setZoom(nextZoom, countGesture = true) {
   const clamped = Math.min(2.2, Math.max(0.75, nextZoom));
   state.zoom = clamped;
   canvas.style.transform = `scale(${clamped})`;
+  elementLayer.style.transform = `translateX(-50%) scale(${clamped})`;
   canvas.style.marginBottom = `${Math.max(0, (clamped - 1) * 1105)}px`;
+  elementLayer.style.marginBottom = `${Math.max(0, (clamped - 1) * 1105)}px`;
   ui.zoomRange.value = Math.round(clamped * 100);
   ui.zoomValue.textContent = `${Math.round(clamped * 100)}%`;
   if (countGesture) state.metrics.zoomGestures += 1;
@@ -176,13 +189,34 @@ function elementLabel(type) {
     normal: "정규분포",
     sine: "사인파",
     parabola: "포물선",
-    circuit: "회로",
     vector: "벡터",
     matrix: "행렬",
     molecule: "분자",
     table: "표",
   };
   return labels[type] || "요소";
+}
+
+function selectElementNode(node) {
+  if (state.selectedElementNode) {
+    state.selectedElementNode.classList.remove("selected");
+    state.selectedElementNode.querySelectorAll(".drag-handle").forEach((handle) => handle.remove());
+  }
+  state.selectedElementNode = node;
+  if (!node) return;
+  node.classList.add("selected");
+  setSelectedElement(node.dataset.type);
+  syncEditorFromNode(node);
+  if (node.dataset.type === "vector") addVectorHandles(node);
+}
+
+function syncEditorFromNode(node) {
+  ui.elementLength.value = node.dataset.length || 190;
+  ui.elementDirection.value = node.dataset.direction || "right";
+  ui.tableRows.value = node.dataset.rows || 3;
+  ui.tableCols.value = node.dataset.cols || 3;
+  ui.axisDimension.value = node.dataset.dimension || 2;
+  ui.elementColor.value = node.dataset.color || "#1f2937";
 }
 
 function pointerDistance() {
@@ -396,7 +430,7 @@ document.querySelectorAll("[data-element]").forEach((button) => {
     }
     saveHistory();
     setSelectedElement(button.dataset.element);
-    drawElement(button.dataset.element);
+    createEditableElement(button.dataset.element);
     state.metrics.elementCount += 1;
     updateMetrics();
     saveCurrentPage();
@@ -404,14 +438,21 @@ document.querySelectorAll("[data-element]").forEach((button) => {
 });
 
 document.getElementById("insertCustomElementBtn").addEventListener("click", () => {
-  saveHistory();
-  drawElement(state.selectedElement, {
+  const props = {
     length: Number(ui.elementLength.value),
     direction: ui.elementDirection.value,
     rows: Number(ui.tableRows.value),
     cols: Number(ui.tableCols.value),
-  });
-  state.metrics.elementCount += 1;
+    dimension: Number(ui.axisDimension.value),
+    color: ui.elementColor.value,
+  };
+
+  if (state.selectedElementNode) {
+    applyElementProps(state.selectedElementNode, props);
+  } else {
+    createEditableElement(state.selectedElement, props);
+    state.metrics.elementCount += 1;
+  }
   updateMetrics();
   saveCurrentPage();
 });
@@ -563,6 +604,251 @@ function section(x, y, w, h, label) {
   ctx.fillText(label, x + 16, y + 32);
 }
 
+function createEditableElement(type, options = {}) {
+  const props = {
+    length: Number(ui.elementLength.value) || 190,
+    direction: ui.elementDirection.value || "right",
+    rows: Number(ui.tableRows.value) || 3,
+    cols: Number(ui.tableCols.value) || 3,
+    dimension: Number(ui.axisDimension.value) || 2,
+    color: ui.elementColor.value || "#1f2937",
+    ...options,
+  };
+  const node = document.createElement("div");
+  node.className = "note-element";
+  node.dataset.type = type;
+  node.dataset.page = String(state.page);
+  node.style.left = `${520 + (state.metrics.elementCount % 3) * 26}px`;
+  node.style.top = `${110 + (state.metrics.elementCount % 7) * 86}px`;
+  node.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    startElementPress(node, event);
+  });
+  elementLayer.appendChild(node);
+  applyElementProps(node, props);
+  selectElementNode(node);
+  return node;
+}
+
+function startElementPress(node, event) {
+  state.longPressFired = false;
+  clearTimeout(state.longPressTimer);
+  state.longPressTimer = setTimeout(() => {
+    state.longPressFired = true;
+    selectElementNode(node);
+    document.getElementById("drawer-elements").hidden = false;
+  }, 420);
+
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startLeft = parseFloat(node.style.left) || 0;
+  const startTop = parseFloat(node.style.top) || 0;
+  const move = (moveEvent) => {
+    node.style.left = `${startLeft + (moveEvent.clientX - startX) / state.zoom}px`;
+    node.style.top = `${startTop + (moveEvent.clientY - startY) / state.zoom}px`;
+  };
+  const up = () => {
+    clearTimeout(state.longPressTimer);
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    if (!state.longPressFired) selectElementNode(node);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+function applyElementProps(node, props) {
+  Object.entries(props).forEach(([key, value]) => {
+    node.dataset[key] = String(value);
+  });
+  renderEditableElement(node);
+  selectElementNode(node);
+}
+
+function renderEditableElement(node) {
+  const type = node.dataset.type;
+  const props = {
+    length: Number(node.dataset.length) || 190,
+    direction: node.dataset.direction || "right",
+    rows: Number(node.dataset.rows) || 3,
+    cols: Number(node.dataset.cols) || 3,
+    dimension: Number(node.dataset.dimension) || 2,
+    color: node.dataset.color || "#1f2937",
+  };
+  node.innerHTML = elementSvg(type, props);
+}
+
+function elementSvg(type, props) {
+  if (type === "vector") return vectorSvg(props);
+  if (type === "table") return tableSvg(props);
+  if (type === "matrix") return matrixSvg(props);
+  if (type === "axis") return axisSvg(props);
+  if (type === "normal") return normalSvg(props);
+  if (type === "sine") return sineSvg(props);
+  if (type === "parabola") return parabolaSvg(props);
+  if (type === "molecule") return moleculeSvg(props);
+  return vectorSvg(props);
+}
+
+function vectorGeometry(props) {
+  const length = props.length || 190;
+  const vectors = {
+    right: [length, 0],
+    left: [-length, 0],
+    up: [0, -length],
+    down: [0, length],
+    diag: [length * 0.82, -length * 0.46],
+  };
+  const [dx, dy] = vectors[props.direction] || vectors.right;
+  const pad = 26;
+  const minX = Math.min(0, dx);
+  const minY = Math.min(0, dy);
+  return {
+    sx: pad - minX,
+    sy: pad - minY,
+    ex: pad - minX + dx,
+    ey: pad - minY + dy,
+    width: Math.abs(dx) + pad * 2,
+    height: Math.abs(dy) + pad * 2,
+  };
+}
+
+function vectorSvg(props) {
+  const g = vectorGeometry(props);
+  const markerId = `arrow-${Math.random().toString(36).slice(2)}`;
+  return `<svg width="${g.width}" height="${g.height}" viewBox="0 0 ${g.width} ${g.height}">
+    <defs><marker id="${markerId}" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="${props.color}"/></marker></defs>
+    <line x1="${g.sx}" y1="${g.sy}" x2="${g.ex}" y2="${g.ey}" stroke="${props.color}" stroke-width="4" stroke-linecap="round" marker-end="url(#${markerId})"/>
+    <text x="${(g.sx + g.ex) / 2 + 8}" y="${(g.sy + g.ey) / 2 - 8}" fill="${props.color}" font-size="18">v</text>
+  </svg>`;
+}
+
+function tableSvg(props) {
+  const rows = Math.max(1, Math.min(8, props.rows || 3));
+  const cols = Math.max(1, Math.min(8, props.cols || 3));
+  const width = props.length || 220;
+  const height = Math.max(64, rows * 32);
+  const rowLines = Array.from({ length: rows - 1 }, (_, i) => `<line x1="0" y1="${((i + 1) * height) / rows}" x2="${width}" y2="${((i + 1) * height) / rows}"/>`).join("");
+  const colLines = Array.from({ length: cols - 1 }, (_, i) => `<line x1="${((i + 1) * width) / cols}" y1="0" x2="${((i + 1) * width) / cols}" y2="${height}"/>`).join("");
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <rect width="${width}" height="${height}" fill="${hexToRgba(props.color, 0.08)}" stroke="${props.color}" stroke-width="3"/>
+    <g stroke="${props.color}" stroke-width="2">${rowLines}${colLines}</g>
+  </svg>`;
+}
+
+function matrixSvg(props) {
+  const rows = Math.max(1, Math.min(5, props.rows || 3));
+  const cols = Math.max(1, Math.min(5, props.cols || 3));
+  const cell = 42;
+  const width = cols * cell + 34;
+  const height = rows * cell + 20;
+  const dots = [];
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      dots.push(`<circle cx="${27 + c * cell}" cy="${18 + r * cell}" r="4" fill="${props.color}" opacity="0.5"/><text x="${20 + c * cell}" y="${35 + r * cell}" fill="${props.color}" opacity="0.35" font-size="11">${r + 1},${c + 1}</text>`);
+    }
+  }
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <path d="M12 4 H3 V${height - 4} H12" fill="none" stroke="${props.color}" stroke-width="3"/>
+    <path d="M${width - 12} 4 H${width - 3} V${height - 4} H${width - 12}" fill="none" stroke="${props.color}" stroke-width="3"/>
+    ${dots.join("")}
+  </svg>`;
+}
+
+function axisSvg(props) {
+  const length = props.length || 210;
+  const z = props.dimension >= 3 ? `<line x1="34" y1="104" x2="${length * 0.48}" y2="28"/><text x="${length * 0.48 + 6}" y="28" fill="${props.color}" font-size="16">z</text>` : "";
+  const y = props.dimension >= 2 ? `<line x1="34" y1="112" x2="34" y2="12"/><text x="12" y="18" fill="${props.color}" font-size="16">y</text>` : "";
+  return `<svg width="${length + 32}" height="130" viewBox="0 0 ${length + 32} 130">
+    <g stroke="${props.color}" stroke-width="3" stroke-linecap="round">
+      <line x1="22" y1="112" x2="${length}" y2="112"/>${y}${z}
+    </g>
+    <text x="${length + 4}" y="122" fill="${props.color}" font-size="16">x</text>
+  </svg>`;
+}
+
+function normalSvg(props) {
+  const length = props.length || 220;
+  const points = [];
+  for (let i = 0; i <= length; i += 5) {
+    const t = (i - length / 2) / (length / 6.4);
+    points.push(`${i},${86 - Math.exp(-0.5 * t * t) * 70}`);
+  }
+  return `<svg width="${length}" height="100" viewBox="0 0 ${length} 100"><polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/></svg>`;
+}
+
+function sineSvg(props) {
+  const length = props.length || 220;
+  const points = [];
+  for (let i = 0; i <= length; i += 5) points.push(`${i},${50 + Math.sin(i / 18) * 30}`);
+  return `<svg width="${length}" height="100" viewBox="0 0 ${length} 100"><polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/></svg>`;
+}
+
+function parabolaSvg(props) {
+  const length = props.length || 190;
+  const points = [];
+  const half = length / 2;
+  for (let i = -half; i <= half; i += 5) points.push(`${half + i},${96 - (i * i) / (length * 0.58)}`);
+  return `<svg width="${length}" height="105" viewBox="0 0 ${length} 105"><polyline points="${points.join(" ")}" fill="none" stroke="${props.color}" stroke-width="3"/></svg>`;
+}
+
+function moleculeSvg(props) {
+  return `<svg width="190" height="120" viewBox="0 0 190 120">
+    <g stroke="${props.color}" stroke-width="3" fill="none"><path d="M45 58 L95 26 L145 58 L95 92 Z"/></g>
+    <g fill="#fff" stroke="${props.color}" stroke-width="3"><circle cx="45" cy="58" r="11"/><circle cx="95" cy="26" r="11"/><circle cx="145" cy="58" r="11"/><circle cx="95" cy="92" r="11"/></g>
+  </svg>`;
+}
+
+function addVectorHandles(node) {
+  const props = {
+    length: Number(node.dataset.length) || 190,
+    direction: node.dataset.direction || "right",
+    color: node.dataset.color || "#1f2937",
+  };
+  const g = vectorGeometry(props);
+  [
+    ["start", g.sx, g.sy],
+    ["end", g.ex, g.ey],
+  ].forEach(([kind, x, y]) => {
+    const handle = document.createElement("button");
+    handle.className = "drag-handle";
+    handle.dataset.kind = kind;
+    handle.style.left = `${x}px`;
+    handle.style.top = `${y}px`;
+    handle.addEventListener("pointerdown", (event) => startVectorHandleDrag(event, node, kind));
+    node.appendChild(handle);
+  });
+}
+
+function startVectorHandleDrag(event, node, kind) {
+  event.preventDefault();
+  event.stopPropagation();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const startLength = Number(node.dataset.length) || 190;
+  const startLeft = parseFloat(node.style.left) || 0;
+  const startTop = parseFloat(node.style.top) || 0;
+  const move = (moveEvent) => {
+    const dx = (moveEvent.clientX - startX) / state.zoom;
+    const dy = (moveEvent.clientY - startY) / state.zoom;
+    const delta = Math.max(Math.abs(dx), Math.abs(dy));
+    node.dataset.length = String(Math.max(60, Math.min(320, startLength + delta)));
+    if (kind === "start") {
+      node.style.left = `${startLeft + dx}px`;
+      node.style.top = `${startTop + dy}px`;
+    }
+    renderEditableElement(node);
+    addVectorHandles(node);
+    syncEditorFromNode(node);
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
 function drawElement(type, options = {}) {
   const x = 585;
   const y = 86 + (state.metrics.elementCount % 8) * 118;
@@ -585,7 +871,6 @@ function drawElement(type, options = {}) {
   if (type === "normal") drawNormal(x, y, opts);
   if (type === "sine") drawSine(x, y, opts);
   if (type === "parabola") drawParabola(x, y, opts);
-  if (type === "circuit") drawCircuit(x, y, opts);
   if (type === "vector") drawVector(x, y, opts);
   if (type === "matrix") drawMatrix(x, y);
   if (type === "molecule") drawMolecule(x, y);
@@ -637,21 +922,6 @@ function drawParabola(x, y, opts = {}) {
     if (i === -half) ctx.moveTo(x + 116 + i, curveY);
     else ctx.lineTo(x + 116 + i, curveY);
   }
-  ctx.stroke();
-}
-
-function drawCircuit(x, y, opts = {}) {
-  const length = opts.length || 198;
-  ctx.strokeRect(x + 20, y + 18, length, 80);
-  ctx.beginPath();
-  ctx.moveTo(x + 62, y + 18);
-  ctx.lineTo(x + 76, y + 2);
-  ctx.lineTo(x + 90, y + 34);
-  ctx.lineTo(x + 104, y + 2);
-  ctx.lineTo(x + 118, y + 18);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x + Math.min(length - 26, 172), y + 98, 12, 0, Math.PI * 2);
   ctx.stroke();
 }
 

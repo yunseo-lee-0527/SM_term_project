@@ -99,6 +99,7 @@
 
         <section class="paper-stage" id="paperStage">
           <canvas id="noteCanvas" aria-label="필기 페이지"></canvas>
+          <div id="elementLayer" class="element-layer" aria-label="편집 가능한 요소 레이어"></div>
           <input id="textComposer" class="text-composer" type="text" placeholder="텍스트 입력" />
           <div id="selectionBox" class="selection-box" hidden></div>
         </section>
@@ -114,7 +115,6 @@
           <button data-element="normal">정규분포</button>
           <button data-element="sine">사인파</button>
           <button data-element="parabola">포물선</button>
-          <button data-element="circuit">회로</button>
           <button data-element="vector">벡터</button>
           <button data-element="matrix">행렬</button>
           <button data-element="molecule">분자</button>
@@ -139,6 +139,18 @@
               <option value="diag">대각선</option>
             </select>
           </label>
+          <label>
+            <span>축</span>
+            <select id="axisDimension">
+              <option value="1">1차원</option>
+              <option value="2" selected>2차원</option>
+              <option value="3">3차원</option>
+            </select>
+          </label>
+          <label>
+            <span>색상</span>
+            <input id="elementColor" type="color" value="#1f2937" />
+          </label>
           <div class="table-controls">
             <label>
               <span>행</span>
@@ -149,7 +161,7 @@
               <input id="tableCols" type="number" min="1" max="8" value="3" />
             </label>
           </div>
-          <button class="insert-element" id="insertCustomElementBtn">조정한 요소 넣기</button>
+          <button class="insert-element" id="insertCustomElementBtn">선택 요소 적용/삽입</button>
         </div>
       </aside>
 
