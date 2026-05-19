@@ -4,7 +4,7 @@ const stage = document.getElementById("paperStage");
 const selectionBox = document.getElementById("selectionBox");
 const textComposer = document.getElementById("textComposer");
 
-const pageTemplates = ["lecture", "problem", "lab"];
+const pageTemplates = ["blank", "blank", "blank"];
 const pageImages = new Map();
 
 const state = {
@@ -60,6 +60,7 @@ const ui = {
   zoomValue: document.getElementById("zoomValue"),
   breakStatus: document.getElementById("breakStatus"),
   breakHint: document.getElementById("breakHint"),
+  templateDialog: document.getElementById("templateDialog"),
 };
 
 function setupCanvas() {
@@ -338,6 +339,7 @@ document.querySelectorAll("[data-template]").forEach((button) => {
     saveCurrentPage();
     document.querySelectorAll("[data-template]").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
+    if (ui.templateDialog.open) ui.templateDialog.close();
   });
 });
 
@@ -361,11 +363,11 @@ document.querySelectorAll(".page-thumb").forEach((button) => {
 document.getElementById("addPageBtn").addEventListener("click", () => {
   saveCurrentPage();
   const pageIndex = pageTemplates.length;
-  pageTemplates.push("lecture");
+  pageTemplates.push("blank");
   const button = document.createElement("button");
   button.className = "page-thumb";
   button.dataset.page = String(pageIndex);
-  button.innerHTML = `<span>${pageIndex + 1}</span><em>강의</em>`;
+  button.innerHTML = `<span>${pageIndex + 1}</span>`;
   button.addEventListener("click", () => {
     saveCurrentPage();
     loadPage(pageIndex);
@@ -375,10 +377,11 @@ document.getElementById("addPageBtn").addEventListener("click", () => {
 });
 
 document.getElementById("newNotebookBtn").addEventListener("click", () => {
-  saveHistory();
-  pageImages.clear();
-  pageTemplates.splice(0, pageTemplates.length, "lecture", "problem", "lab");
-  loadPage(0);
+  ui.templateDialog.showModal();
+});
+
+document.getElementById("libraryBtn").addEventListener("click", () => {
+  ui.templateDialog.showModal();
 });
 
 document.getElementById("addDocTabBtn").addEventListener("click", () => {
@@ -390,6 +393,23 @@ document.getElementById("addDocTabBtn").addEventListener("click", () => {
 
 document.getElementById("fullscreenBtn").addEventListener("click", () => {
   document.body.classList.toggle("focus-mode");
+});
+
+document.querySelectorAll(".drawer-toggle").forEach((button) => {
+  button.addEventListener("click", () => {
+    const drawer = document.getElementById(`drawer-${button.dataset.drawer}`);
+    const willOpen = drawer.hidden;
+    document.querySelectorAll(".floating-drawer").forEach((item) => {
+      item.hidden = true;
+    });
+    drawer.hidden = !willOpen;
+  });
+});
+
+document.querySelectorAll("[data-close]").forEach((button) => {
+  button.addEventListener("click", () => {
+    button.closest(".floating-drawer").hidden = true;
+  });
 });
 
 document.getElementById("exportBtn").addEventListener("click", () => {
