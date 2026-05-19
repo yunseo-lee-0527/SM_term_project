@@ -9,6 +9,12 @@
   </head>
   <body>
     <main class="app">
+      <header class="status-bar" aria-label="iPad 상태 표시줄">
+        <span>9:41</span>
+        <span>StudyFlow Notes</span>
+        <span>Wi-Fi 100%</span>
+      </header>
+
       <header class="document-tabs">
         <button class="nav-button" id="libraryBtn" title="문서함">‹ 문서</button>
         <div class="tab-strip">
@@ -25,6 +31,8 @@
 
       <header class="toolbar" aria-label="필기 도구">
         <div class="left-tools">
+          <button class="icon-button" title="사이드바">☰</button>
+          <button class="icon-button" title="검색">⌕</button>
           <button class="icon-button" id="undoBtn" title="실행 취소">↶</button>
           <button class="icon-button" title="다시 실행">↷</button>
         </div>
@@ -38,6 +46,7 @@
           <button class="tool" id="quickToggleBtn" title="펜/지우개 빠른 전환">⇄</button>
           <button class="tool drawer-toggle" data-drawer="elements" title="요소">◇</button>
           <button class="tool drawer-toggle" data-drawer="assets" title="이미지">▧</button>
+          <button class="tool" title="마이크">●</button>
         </div>
 
         <div class="right-tools">
@@ -110,6 +119,37 @@
           <button data-element="matrix">행렬</button>
           <button data-element="molecule">분자</button>
           <button data-element="table">표</button>
+        </div>
+        <div class="element-editor">
+          <div class="editor-title">
+            <strong id="elementEditorTitle">요소 조정</strong>
+            <small>요소를 길게 누르면 세부 조정</small>
+          </div>
+          <label>
+            <span>길이</span>
+            <input id="elementLength" type="range" min="80" max="300" value="190" />
+          </label>
+          <label>
+            <span>방향</span>
+            <select id="elementDirection">
+              <option value="right">오른쪽</option>
+              <option value="left">왼쪽</option>
+              <option value="up">위</option>
+              <option value="down">아래</option>
+              <option value="diag">대각선</option>
+            </select>
+          </label>
+          <div class="table-controls">
+            <label>
+              <span>행</span>
+              <input id="tableRows" type="number" min="1" max="8" value="3" />
+            </label>
+            <label>
+              <span>열</span>
+              <input id="tableCols" type="number" min="1" max="8" value="3" />
+            </label>
+          </div>
+          <button class="insert-element" id="insertCustomElementBtn">조정한 요소 넣기</button>
         </div>
       </aside>
 

@@ -21,6 +21,9 @@ const state = {
   activePointers: new Map(),
   pinchStartDistance: 0,
   pinchStartZoom: 1,
+  selectedElement: "vector",
+  longPressTimer: null,
+  longPressFired: false,
   history: [],
   startedAt: Date.now(),
   breakSeconds: 25 * 60,
@@ -61,6 +64,11 @@ const ui = {
   breakStatus: document.getElementById("breakStatus"),
   breakHint: document.getElementById("breakHint"),
   templateDialog: document.getElementById("templateDialog"),
+  elementEditorTitle: document.getElementById("elementEditorTitle"),
+  elementLength: document.getElementById("elementLength"),
+  elementDirection: document.getElementById("elementDirection"),
+  tableRows: document.getElementById("tableRows"),
+  tableCols: document.getElementById("tableCols"),
 };
 
 function setupCanvas() {
@@ -150,10 +158,31 @@ function setZoom(nextZoom, countGesture = true) {
   const clamped = Math.min(2.2, Math.max(0.75, nextZoom));
   state.zoom = clamped;
   canvas.style.transform = `scale(${clamped})`;
+  canvas.style.marginBottom = `${Math.max(0, (clamped - 1) * 1105)}px`;
   ui.zoomRange.value = Math.round(clamped * 100);
   ui.zoomValue.textContent = `${Math.round(clamped * 100)}%`;
   if (countGesture) state.metrics.zoomGestures += 1;
   updateMetrics();
+}
+
+function setSelectedElement(type) {
+  state.selectedElement = type;
+  ui.elementEditorTitle.textContent = `${elementLabel(type)} 조정`;
+}
+
+function elementLabel(type) {
+  const labels = {
+    axis: "좌표축",
+    normal: "정규분포",
+    sine: "사인파",
+    parabola: "포물선",
+    circuit: "회로",
+    vector: "벡터",
+    matrix: "행렬",
+    molecule: "분자",
+    table: "표",
+  };
+  return labels[type] || "요소";
 }
 
 function pointerDistance() {
@@ -344,13 +373,47 @@ document.querySelectorAll("[data-template]").forEach((button) => {
 });
 
 document.querySelectorAll("[data-element]").forEach((button) => {
+  button.addEventListener("pointerdown", () => {
+    state.longPressFired = false;
+    state.longPressTimer = setTimeout(() => {
+      state.longPressFired = true;
+      setSelectedElement(button.dataset.element);
+    }, 450);
+  });
+
+  button.addEventListener("pointerup", () => {
+    clearTimeout(state.longPressTimer);
+  });
+
+  button.addEventListener("pointerleave", () => {
+    clearTimeout(state.longPressTimer);
+  });
+
   button.addEventListener("click", () => {
+    if (state.longPressFired) {
+      state.longPressFired = false;
+      return;
+    }
     saveHistory();
+    setSelectedElement(button.dataset.element);
     drawElement(button.dataset.element);
     state.metrics.elementCount += 1;
     updateMetrics();
     saveCurrentPage();
   });
+});
+
+document.getElementById("insertCustomElementBtn").addEventListener("click", () => {
+  saveHistory();
+  drawElement(state.selectedElement, {
+    length: Number(ui.elementLength.value),
+    direction: ui.elementDirection.value,
+    rows: Number(ui.tableRows.value),
+    cols: Number(ui.tableCols.value),
+  });
+  state.metrics.elementCount += 1;
+  updateMetrics();
+  saveCurrentPage();
 });
 
 document.querySelectorAll(".page-thumb").forEach((button) => {
@@ -500,9 +563,16 @@ function section(x, y, w, h, label) {
   ctx.fillText(label, x + 16, y + 32);
 }
 
-function drawElement(type) {
+function drawElement(type, options = {}) {
   const x = 585;
   const y = 86 + (state.metrics.elementCount % 8) * 118;
+  const opts = {
+    length: 190,
+    direction: "right",
+    rows: 3,
+    cols: 3,
+    ...options,
+  };
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
   ctx.strokeStyle = "#1f2937";
@@ -511,43 +581,46 @@ function drawElement(type) {
   ctx.font = "18px Arial";
   ctx.setLineDash([]);
 
-  if (type === "axis") drawAxis(x, y);
-  if (type === "normal") drawNormal(x, y);
-  if (type === "sine") drawSine(x, y);
-  if (type === "parabola") drawParabola(x, y);
-  if (type === "circuit") drawCircuit(x, y);
-  if (type === "vector") drawVector(x, y);
+  if (type === "axis") drawAxis(x, y, opts);
+  if (type === "normal") drawNormal(x, y, opts);
+  if (type === "sine") drawSine(x, y, opts);
+  if (type === "parabola") drawParabola(x, y, opts);
+  if (type === "circuit") drawCircuit(x, y, opts);
+  if (type === "vector") drawVector(x, y, opts);
   if (type === "matrix") drawMatrix(x, y);
   if (type === "molecule") drawMolecule(x, y);
-  if (type === "table") drawTable(x, y);
+  if (type === "table") drawTable(x, y, opts);
 
   ctx.restore();
 }
 
-function drawAxis(x, y) {
+function drawAxis(x, y, opts = {}) {
+  const length = opts.length || 232;
   ctx.beginPath();
   ctx.moveTo(x, y + 96);
-  ctx.lineTo(x + 232, y + 96);
+  ctx.lineTo(x + length, y + 96);
   ctx.moveTo(x + 24, y + 112);
   ctx.lineTo(x + 24, y);
   ctx.stroke();
-  ctx.fillText("x", x + 218, y + 116);
+  ctx.fillText("x", x + length - 14, y + 116);
   ctx.fillText("y", x + 4, y + 18);
 }
 
-function drawNormal(x, y) {
+function drawNormal(x, y, opts = {}) {
+  const length = opts.length || 230;
   ctx.beginPath();
   ctx.moveTo(x, y + 88);
-  for (let i = 0; i <= 230; i += 4) {
-    const t = (i - 115) / 36;
+  for (let i = 0; i <= length; i += 4) {
+    const t = (i - length / 2) / (length / 6.4);
     ctx.lineTo(x + i, y + 88 - Math.exp(-0.5 * t * t) * 78);
   }
   ctx.stroke();
 }
 
-function drawSine(x, y) {
+function drawSine(x, y, opts = {}) {
+  const length = opts.length || 230;
   ctx.beginPath();
-  for (let i = 0; i <= 230; i += 4) {
+  for (let i = 0; i <= length; i += 4) {
     const waveY = y + 54 + Math.sin(i / 19) * 32;
     if (i === 0) ctx.moveTo(x + i, waveY);
     else ctx.lineTo(x + i, waveY);
@@ -555,18 +628,21 @@ function drawSine(x, y) {
   ctx.stroke();
 }
 
-function drawParabola(x, y) {
+function drawParabola(x, y, opts = {}) {
+  const length = opts.length || 188;
+  const half = length / 2;
   ctx.beginPath();
-  for (let i = -94; i <= 94; i += 4) {
-    const curveY = y + 100 - (i * i) / 110;
-    if (i === -94) ctx.moveTo(x + 116 + i, curveY);
+  for (let i = -half; i <= half; i += 4) {
+    const curveY = y + 100 - (i * i) / (length * 0.58);
+    if (i === -half) ctx.moveTo(x + 116 + i, curveY);
     else ctx.lineTo(x + 116 + i, curveY);
   }
   ctx.stroke();
 }
 
-function drawCircuit(x, y) {
-  ctx.strokeRect(x + 20, y + 18, 198, 80);
+function drawCircuit(x, y, opts = {}) {
+  const length = opts.length || 198;
+  ctx.strokeRect(x + 20, y + 18, length, 80);
   ctx.beginPath();
   ctx.moveTo(x + 62, y + 18);
   ctx.lineTo(x + 76, y + 2);
@@ -575,19 +651,35 @@ function drawCircuit(x, y) {
   ctx.lineTo(x + 118, y + 18);
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(x + 172, y + 98, 12, 0, Math.PI * 2);
+  ctx.arc(x + Math.min(length - 26, 172), y + 98, 12, 0, Math.PI * 2);
   ctx.stroke();
 }
 
-function drawVector(x, y) {
+function drawVector(x, y, opts = {}) {
+  const length = opts.length || 190;
+  const direction = opts.direction || "right";
+  const vectors = {
+    right: [length, 0],
+    left: [-length, 0],
+    up: [0, -length],
+    down: [0, length],
+    diag: [length * 0.82, -length * 0.46],
+  };
+  const [dx, dy] = vectors[direction] || vectors.right;
+  const startX = direction === "left" ? x + 212 : x + 22;
+  const startY = direction === "up" ? y + 106 : y + 58;
+  const endX = startX + dx;
+  const endY = startY + dy;
+  const angle = Math.atan2(dy, dx);
+  const head = 15;
   ctx.beginPath();
-  ctx.moveTo(x + 22, y + 96);
-  ctx.lineTo(x + 202, y + 24);
-  ctx.lineTo(x + 184, y + 22);
-  ctx.moveTo(x + 202, y + 24);
-  ctx.lineTo(x + 192, y + 40);
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.lineTo(endX - head * Math.cos(angle - 0.55), endY - head * Math.sin(angle - 0.55));
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(endX - head * Math.cos(angle + 0.55), endY - head * Math.sin(angle + 0.55));
   ctx.stroke();
-  ctx.fillText("v", x + 112, y + 52);
+  ctx.fillText("v", (startX + endX) / 2 + 6, (startY + endY) / 2 - 8);
 }
 
 function drawMatrix(x, y) {
@@ -611,18 +703,22 @@ function drawMolecule(x, y) {
   });
 }
 
-function drawTable(x, y) {
-  ctx.strokeRect(x, y, 230, 104);
-  for (let i = 1; i < 4; i += 1) {
+function drawTable(x, y, opts = {}) {
+  const rows = Math.max(1, Math.min(8, opts.rows || 3));
+  const cols = Math.max(1, Math.min(8, opts.cols || 3));
+  const width = opts.length || 230;
+  const height = Math.max(58, rows * 28);
+  ctx.strokeRect(x, y, width, height);
+  for (let i = 1; i < rows; i += 1) {
     ctx.beginPath();
-    ctx.moveTo(x, y + i * 26);
-    ctx.lineTo(x + 230, y + i * 26);
+    ctx.moveTo(x, y + (height / rows) * i);
+    ctx.lineTo(x + width, y + (height / rows) * i);
     ctx.stroke();
   }
-  for (let i = 1; i < 3; i += 1) {
+  for (let i = 1; i < cols; i += 1) {
     ctx.beginPath();
-    ctx.moveTo(x + i * 76, y);
-    ctx.lineTo(x + i * 76, y + 104);
+    ctx.moveTo(x + (width / cols) * i, y);
+    ctx.lineTo(x + (width / cols) * i, y + height);
     ctx.stroke();
   }
 }
@@ -685,6 +781,7 @@ function updateBreakStatus() {
 
 setupCanvas();
 setZoom(1, false);
+setSelectedElement("vector");
 updateMetrics();
 updateBreakStatus();
 setInterval(updateElapsed, 1000);
