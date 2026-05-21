@@ -1,4 +1,26 @@
-export type ToolMode = "pen" | "highlighter" | "eraser";
+export type ToolMode = "pen" | "highlighter" | "eraser" | "lasso" | "text";
+
+export type ElementKind = "axis" | "distribution" | "function" | "vector" | "matrix" | "table";
+
+export type DistributionKind = "normal" | "uniform" | "exponential" | "bimodal" | "skewed";
+
+export type NoteElement = {
+  id: string;
+  kind: ElementKind;
+  x: number;
+  y: number;
+  color: string;
+  length?: number;
+  rows?: number;
+  cols?: number;
+  dimension?: 1 | 2 | 3;
+  distribution?: DistributionKind;
+  expression?: string;
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+};
 
 export type InkPoint = {
   x: number;
@@ -26,6 +48,7 @@ export type Page = {
   title: string;
   background: PageBackground;
   strokes: Stroke[];
+  elements: NoteElement[];
 };
 
 export type Notebook = {

@@ -1,4 +1,4 @@
-import type { HistoryState, InkAction, Notebook, Page, Stroke } from "../types/ink";
+import type { HistoryState, InkAction, Notebook, NoteElement, Page, Stroke } from "../types/ink";
 
 export function makeId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -10,6 +10,7 @@ export function createPage(index: number): Page {
     title: `Page ${index}`,
     background: "grid",
     strokes: [],
+    elements: [],
   };
 }
 
@@ -50,6 +51,20 @@ export function removeStrokes(notebook: Notebook, pageId: string, strokeIds: str
   return updatePage(notebook, pageId, (page) => ({
     ...page,
     strokes: page.strokes.filter((stroke) => !removed.has(stroke.id)),
+  }));
+}
+
+export function appendElement(notebook: Notebook, pageId: string, element: NoteElement) {
+  return updatePage(notebook, pageId, (page) => ({
+    ...page,
+    elements: [...(page.elements ?? []), element],
+  }));
+}
+
+export function updateElement(notebook: Notebook, pageId: string, element: NoteElement) {
+  return updatePage(notebook, pageId, (page) => ({
+    ...page,
+    elements: (page.elements ?? []).map((item) => (item.id === element.id ? element : item)),
   }));
 }
 

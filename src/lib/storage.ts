@@ -18,7 +18,13 @@ export async function loadNotebook() {
       return null;
     }
 
-    return notebook;
+    return {
+      ...notebook,
+      pages: notebook.pages.map((page) => ({
+        ...page,
+        elements: page.elements ?? [],
+      })),
+    };
   } catch {
     return null;
   }

@@ -1,4 +1,4 @@
-import { Eraser, Highlighter, Minus, PenLine, Plus, Redo2, Undo2 } from "lucide-react-native";
+import { Eraser, Highlighter, Image, Minus, PenLine, Plus, Redo2, Square, Type, Undo2 } from "lucide-react-native";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { clamp } from "../lib/geometry";
@@ -11,11 +11,15 @@ type ToolbarProps = {
   tool: ToolMode;
   color: string;
   width: number;
+  eraserWidth: number;
   canUndo: boolean;
   canRedo: boolean;
   onToolChange: (tool: ToolMode) => void;
   onColorChange: (color: string) => void;
   onWidthChange: (width: number) => void;
+  onEraserWidthChange: (width: number) => void;
+  onQuickToggle: () => void;
+  onOpenElements: () => void;
   onUndo: () => void;
   onRedo: () => void;
 };
@@ -24,49 +28,45 @@ export function Toolbar({
   tool,
   color,
   width,
+  eraserWidth,
   canUndo,
   canRedo,
   onToolChange,
   onColorChange,
   onWidthChange,
+  onEraserWidthChange,
+  onQuickToggle,
+  onOpenElements,
   onUndo,
   onRedo,
 }: ToolbarProps) {
   const decreaseWidth = () => onWidthChange(clamp(width - 2, 4, 22));
   const increaseWidth = () => onWidthChange(clamp(width + 2, 4, 22));
+  const decreaseEraserWidth = () => onEraserWidthChange(clamp(eraserWidth - 4, 16, 72));
+  const increaseEraserWidth = () => onEraserWidthChange(clamp(eraserWidth + 4, 16, 72));
 
   return (
     <View style={styles.toolbar}>
       <View style={styles.brandBlock}>
-        <Text style={styles.brand}>InkPad Lab</Text>
-        <Text style={styles.status}>{tool === "eraser" ? "Eraser" : `${width}px`}</Text>
+        <Text style={styles.brand}>StudyFlow Notes</Text>
+        <Text style={styles.status}>{tool === "eraser" ? `지우개 ${eraserWidth}px` : `${width}px`}</Text>
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolRow}>
         <View style={styles.group}>
-          <IconButton
-            accessibilityLabel="펜"
-            icon={PenLine}
-            selected={tool === "pen"}
-            onPress={() => onToolChange("pen")}
-          />
-          <IconButton
-            accessibilityLabel="형광펜"
-            icon={Highlighter}
-            selected={tool === "highlighter"}
-            onPress={() => onToolChange("highlighter")}
-          />
-          <IconButton
-            accessibilityLabel="지우개"
-            icon={Eraser}
-            selected={tool === "eraser"}
-            onPress={() => onToolChange("eraser")}
-          />
+          <IconButton accessibilityLabel="펜" icon={PenLine} selected={tool === "pen"} onPress={() => onToolChange("pen")} />
+          <IconButton accessibilityLabel="형광펜" icon={Highlighter} selected={tool === "highlighter"} onPress={() => onToolChange("highlighter")} />
+          <IconButton accessibilityLabel="지우개" icon={Eraser} selected={tool === "eraser"} onPress={() => onToolChange("eraser")} />
+          <IconButton accessibilityLabel="올가미" icon={Square} selected={tool === "lasso"} onPress={() => onToolChange("lasso")} />
+          <IconButton accessibilityLabel="텍스트" icon={Type} selected={tool === "text"} onPress={() => onToolChange("text")} />
+          <IconButton accessibilityLabel="펜/지우개 빠른 전환" icon={Minus} onPress={onQuickToggle} />
         </View>
 
         <View style={styles.group}>
-          <IconButton accessibilityLabel="실행취소" icon={Undo2} disabled={!canUndo} onPress={onUndo} />
-          <IconButton accessibilityLabel="다시실행" icon={Redo2} disabled={!canRedo} onPress={onRedo} />
+          <IconButton accessibilityLabel="실행 취소" icon={Undo2} disabled={!canUndo} onPress={onUndo} />
+          <IconButton accessibilityLabel="다시 실행" icon={Redo2} disabled={!canRedo} onPress={onRedo} />
+          <IconButton accessibilityLabel="요소" icon={Plus} onPress={onOpenElements} />
+          <IconButton accessibilityLabel="이미지" icon={Image} disabled onPress={() => undefined} />
         </View>
 
         <View style={styles.swatches}>
@@ -76,17 +76,14 @@ export function Toolbar({
               accessibilityRole="button"
               key={inkColor}
               onPress={() => onColorChange(inkColor)}
-              style={[
-                styles.swatch,
-                { backgroundColor: inkColor },
-                color === inkColor && styles.activeSwatch,
-              ]}
+              style={[styles.swatch, { backgroundColor: inkColor }, color === inkColor && styles.activeSwatch]}
             />
           ))}
         </View>
 
         <View style={styles.widthControl}>
-          <IconButton accessibilityLabel="굵기 줄이기" icon={Minus} onPress={decreaseWidth} />
+          <Text style={styles.controlLabel}>펜</Text>
+          <IconButton accessibilityLabel="펜 굵기 줄이기" icon={Minus} onPress={decreaseWidth} />
           <View style={styles.widthPreview}>
             <View
               style={[
@@ -99,7 +96,25 @@ export function Toolbar({
               ]}
             />
           </View>
-          <IconButton accessibilityLabel="굵기 키우기" icon={Plus} onPress={increaseWidth} />
+          <IconButton accessibilityLabel="펜 굵기 키우기" icon={Plus} onPress={increaseWidth} />
+        </View>
+
+        <View style={styles.widthControl}>
+          <Text style={styles.controlLabel}>지우개</Text>
+          <IconButton accessibilityLabel="지우개 줄이기" icon={Minus} onPress={decreaseEraserWidth} />
+          <View style={styles.widthPreview}>
+            <View
+              style={[
+                styles.eraserPreview,
+                {
+                  width: clamp(eraserWidth * 0.55, 10, 36),
+                  height: clamp(eraserWidth * 0.55, 10, 36),
+                  borderRadius: clamp(eraserWidth * 0.28, 5, 18),
+                },
+              ]}
+            />
+          </View>
+          <IconButton accessibilityLabel="지우개 키우기" icon={Plus} onPress={increaseEraserWidth} />
         </View>
       </ScrollView>
     </View>
@@ -108,7 +123,7 @@ export function Toolbar({
 
 const styles = StyleSheet.create({
   toolbar: {
-    minHeight: 78,
+    minHeight: 82,
     flexDirection: "row",
     alignItems: "center",
     gap: 16,
@@ -119,7 +134,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f7fafc",
   },
   brandBlock: {
-    minWidth: 116,
+    minWidth: 152,
   },
   brand: {
     color: "#111827",
@@ -176,5 +191,14 @@ const styles = StyleSheet.create({
   },
   widthDot: {
     backgroundColor: "#111827",
+  },
+  eraserPreview: {
+    backgroundColor: "#93c5fd",
+    opacity: 0.72,
+  },
+  controlLabel: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "800",
   },
 });
