@@ -6,7 +6,7 @@ import { StatusBar } from "expo-status-bar";
 import { HandwritingCanvas } from "./src/components/HandwritingCanvas";
 import { PageStrip } from "./src/components/PageStrip";
 import { Toolbar } from "./src/components/Toolbar";
-import { strokeIntersectsEraserPath } from "./src/lib/geometry";
+import { recognizeShape, strokeIntersectsEraserPath, type RecognizedShape } from "./src/lib/geometry";
 import {
   appendStroke,
   appendElement,
@@ -95,12 +95,21 @@ export default function App() {
         return;
       }
 
-      const action = { type: "add-stroke", pageId: activePage.id, stroke } as const;
+      if (tool === "shape") {
+        const shape = recognizeShape(stroke.points);
+        if (shape) {
+          const element = shapeToElement(shape, inkColor);
+          setNotebook((current) => appendElement(current, activePage.id, element));
+          setSelectedElementId(element.id);
+          return;
+        }
+      }
 
+      const action = { type: "add-stroke", pageId: activePage.id, stroke } as const;
       setNotebook((current) => appendStroke(current, activePage.id, stroke));
       setHistory((current) => pushHistory(current, action));
     },
-    [activePage.id, tool],
+    [activePage.id, inkColor, tool],
   );
 
   const handleErasePath = useCallback(
@@ -270,6 +279,41 @@ export default function App() {
   );
 }
 
+function shapeToElement(shape: RecognizedShape, color: string): NoteElement {
+  const id = `element-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const PAD = 10;
+
+  if (shape.kind === "circle") {
+    return { id, kind: "circle", x: shape.cx - shape.r - PAD, y: shape.cy - shape.r - PAD, color, radius: shape.r };
+  }
+
+  if (shape.kind === "rect") {
+    return { id, kind: "rect", x: shape.x - PAD, y: shape.y - PAD, color, shapeW: shape.w, shapeH: shape.h };
+  }
+
+  if (shape.kind === "triangle") {
+    const xs = shape.pts.map(([x]) => x);
+    const ys = shape.pts.map(([, y]) => y);
+    const ox = Math.min(...xs) - PAD;
+    const oy = Math.min(...ys) - PAD;
+    return { id, kind: "triangle", x: ox, y: oy, color, pts: shape.pts.map(([x, y]) => [x - ox, y - oy]) };
+  }
+
+  const ox = Math.min(shape.x1, shape.x2) - PAD;
+  const oy = Math.min(shape.y1, shape.y2) - PAD;
+  return {
+    id,
+    kind: "line_drawn",
+    x: ox,
+    y: oy,
+    color,
+    x1: shape.x1 - ox,
+    y1: shape.y1 - oy,
+    x2: shape.x2 - ox,
+    y2: shape.y2 - oy,
+  };
+}
+
 function createElement(kind: ElementKind, color: string, index: number): NoteElement {
   return {
     id: `element-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -403,26 +447,36 @@ function ElementPanel({
   );
 }
 
-function controlsForElement(kind: ElementKind) {
-  return {
+function controlsForElement(kind: ElementKind): string[] {
+  const map: Partial<Record<ElementKind, string[]>> = {
     axis: ["length", "axis"],
     distribution: ["length", "distribution"],
     function: ["length", "function"],
     vector: [],
     matrix: ["grid"],
     table: ["length", "grid"],
-  }[kind];
+    circle: [],
+    rect: [],
+    triangle: [],
+    line_drawn: [],
+  };
+  return map[kind] ?? [];
 }
 
-function elementLabel(kind: ElementKind) {
-  return {
+function elementLabel(kind: ElementKind): string {
+  const map: Partial<Record<ElementKind, string>> = {
     axis: "좌표축",
     distribution: "분포",
     function: "함수",
     vector: "벡터",
     matrix: "행렬",
     table: "표",
-  }[kind];
+    circle: "원",
+    rect: "사각형",
+    triangle: "삼각형",
+    line_drawn: "직선",
+  };
+  return map[kind] ?? kind;
 }
 
 function NumberStepper({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {

@@ -1,6 +1,6 @@
-export type ToolMode = "pen" | "highlighter" | "eraser" | "lasso" | "text";
+export type ToolMode = "pen" | "highlighter" | "eraser" | "lasso" | "text" | "shape";
 
-export type ElementKind = "axis" | "distribution" | "function" | "vector" | "matrix" | "table";
+export type ElementKind = "axis" | "distribution" | "function" | "vector" | "matrix" | "table" | "circle" | "rect" | "triangle" | "line_drawn";
 
 export type DistributionKind = "normal" | "uniform" | "exponential" | "bimodal" | "skewed";
 
@@ -20,6 +20,10 @@ export type NoteElement = {
   y1?: number;
   x2?: number;
   y2?: number;
+  radius?: number;
+  shapeW?: number;
+  shapeH?: number;
+  pts?: number[][];
 };
 
 export type InkPoint = {

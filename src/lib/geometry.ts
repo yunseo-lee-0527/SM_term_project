@@ -204,6 +204,125 @@ export function strokeIntersectsEraserPath(stroke: Stroke, eraserPoints: InkPoin
   return false;
 }
 
+export type RecognizedShape =
+  | { kind: "circle"; cx: number; cy: number; r: number }
+  | { kind: "rect"; x: number; y: number; w: number; h: number }
+  | { kind: "triangle"; pts: [number, number][] }
+  | { kind: "line_drawn"; x1: number; y1: number; x2: number; y2: number };
+
+function totalArcLength(pts: Pick<InkPoint, "x" | "y">[]): number {
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) len += distance(pts[i - 1], pts[i]);
+  return len;
+}
+
+function downsample(points: InkPoint[], n: number): InkPoint[] {
+  if (points.length <= n) return points;
+  const result: InkPoint[] = [];
+  const step = (points.length - 1) / (n - 1);
+  for (let i = 0; i < n; i++) result.push(points[Math.round(i * step)]);
+  return result;
+}
+
+function centroid2D(pts: Pick<InkPoint, "x" | "y">[]): { x: number; y: number } {
+  const s = pts.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+  return { x: s.x / pts.length, y: s.y / pts.length };
+}
+
+function avgDeviation(
+  pts: Pick<InkPoint, "x" | "y">[],
+  a: Pick<InkPoint, "x" | "y">,
+  b: Pick<InkPoint, "x" | "y">,
+): number {
+  const total = pts.reduce((sum, p) => sum + pointToSegmentDistance(p, a, b), 0);
+  return total / pts.length;
+}
+
+function detectCorners(
+  pts: Pick<InkPoint, "x" | "y">[],
+  win = 8,
+  minDeg = 45,
+  minSpacing = 30,
+): { x: number; y: number }[] {
+  const corners: { x: number; y: number }[] = [];
+  const N = pts.length;
+
+  for (let i = win; i < N - win; i++) {
+    const dx1 = pts[i].x - pts[i - win].x;
+    const dy1 = pts[i].y - pts[i - win].y;
+    const dx2 = pts[i + win].x - pts[i].x;
+    const dy2 = pts[i + win].y - pts[i].y;
+    const l1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+    const l2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+    if (l1 < 5 || l2 < 5) continue;
+
+    const dot = clamp((dx1 * dx2 + dy1 * dy2) / (l1 * l2), -1, 1);
+    const deg = (Math.acos(dot) * 180) / Math.PI;
+
+    if (deg > minDeg) {
+      const last = corners[corners.length - 1];
+      if (!last || distance(pts[i], last) > minSpacing) {
+        corners.push({ x: pts[i].x, y: pts[i].y });
+      }
+    }
+  }
+
+  return corners;
+}
+
+export function recognizeShape(rawPoints: InkPoint[]): RecognizedShape | null {
+  if (rawPoints.length < 10) return null;
+
+  const points = downsample(rawPoints, 80);
+  const start = points[0];
+  const end = points[points.length - 1];
+  const arc = totalArcLength(points);
+
+  if (arc < 40) return null;
+
+  const closeDist = distance(start, end);
+  const isClosed = closeDist < arc * 0.18 && arc > 100;
+
+  if (!isClosed) {
+    const straight = distance(start, end);
+    if (straight < 35) return null;
+    const avgDev = avgDeviation(points, start, end);
+    if (avgDev < 20 && arc / straight < 1.45) {
+      return { kind: "line_drawn", x1: start.x, y1: start.y, x2: end.x, y2: end.y };
+    }
+    return null;
+  }
+
+  const c = centroid2D(points);
+  const radii = points.map((p) => distance(p, c));
+  const avgR = radii.reduce((a, b) => a + b, 0) / radii.length;
+  const stdR = Math.sqrt(radii.reduce((a, r) => a + (r - avgR) ** 2, 0) / radii.length);
+
+  if (stdR / avgR < 0.24) {
+    return { kind: "circle", cx: c.x, cy: c.y, r: avgR };
+  }
+
+  const corners = detectCorners(points);
+
+  if (corners.length === 3) {
+    return { kind: "triangle", pts: corners.map((p) => [p.x, p.y] as [number, number]) };
+  }
+
+  if (corners.length === 4) {
+    const xs = corners.map((p) => p.x);
+    const ys = corners.map((p) => p.y);
+    return {
+      kind: "rect",
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      w: Math.max(...xs) - Math.min(...xs),
+      h: Math.max(...ys) - Math.min(...ys),
+    };
+  }
+
+  return null;
+}
+
 export function createGridLines() {
   const lines: GridLine[] = [];
 

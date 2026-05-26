@@ -1,4 +1,4 @@
-import { Eraser, Highlighter, Image, Minus, PenLine, Plus, Redo2, Square, Type, Undo2 } from "lucide-react-native";
+import { Eraser, Highlighter, Image, Minus, PenLine, Plus, Redo2, Shapes, Square, Type, Undo2 } from "lucide-react-native";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { clamp } from "../lib/geometry";
@@ -59,6 +59,7 @@ export function Toolbar({
           <IconButton accessibilityLabel="지우개" icon={Eraser} selected={tool === "eraser"} onPress={() => onToolChange("eraser")} />
           <IconButton accessibilityLabel="올가미" icon={Square} selected={tool === "lasso"} onPress={() => onToolChange("lasso")} />
           <IconButton accessibilityLabel="텍스트" icon={Type} selected={tool === "text"} onPress={() => onToolChange("text")} />
+          <IconButton accessibilityLabel="도형 인식" icon={Shapes} selected={tool === "shape"} onPress={() => onToolChange("shape")} />
           <IconButton accessibilityLabel="펜/지우개 빠른 전환" icon={Minus} onPress={onQuickToggle} />
         </View>
 

@@ -2,7 +2,7 @@ import { Canvas, Circle, Group, Line, Rect } from "@shopify/react-native-skia";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Svg, { Circle as SvgCircle, Line as SvgLine, Path, Polyline, Rect as SvgRect, Text as SvgText } from "react-native-svg";
+import Svg, { Circle as SvgCircle, Line as SvgLine, Path, Polygon as SvgPolygon, Polyline, Rect as SvgRect, Text as SvgText } from "react-native-svg";
 
 import { PAPER_HEIGHT, PAPER_WIDTH } from "../constants/paper";
 import {
@@ -481,6 +481,52 @@ function ElementSvg({ element }: { element: NoteElement }) {
           const col = index % cols;
           return <SvgCircle cx={27 + col * cell} cy={20 + row * cell} fill={color} key={index} opacity={0.5} r={4} />;
         })}
+      </Svg>
+    );
+  }
+
+  if (element.kind === "circle") {
+    const r = element.radius ?? 60;
+    const size = r * 2 + 20;
+    return (
+      <Svg height={size} width={size}>
+        <SvgCircle cx={r + 10} cy={r + 10} fill="none" r={r} stroke={color} strokeLinecap="round" strokeWidth={4} />
+      </Svg>
+    );
+  }
+
+  if (element.kind === "rect") {
+    const w = element.shapeW ?? 120;
+    const h = element.shapeH ?? 80;
+    return (
+      <Svg height={h + 20} width={w + 20}>
+        <SvgRect fill="none" height={h} stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} width={w} x={10} y={10} />
+      </Svg>
+    );
+  }
+
+  if (element.kind === "triangle") {
+    const raw = element.pts ?? [[0, 80], [80, 80], [40, 0]];
+    const xs = raw.map(([x]) => x);
+    const ys = raw.map(([, y]) => y);
+    const w = Math.max(...xs) + 20;
+    const h = Math.max(...ys) + 20;
+    const pointsStr = raw.map(([x, y]) => `${x + 10},${y + 10}`).join(" ");
+    return (
+      <Svg height={h} width={w}>
+        <SvgPolygon fill="none" points={pointsStr} stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} />
+      </Svg>
+    );
+  }
+
+  if (element.kind === "line_drawn") {
+    const x1 = element.x1 ?? 0;
+    const y1 = element.y1 ?? 0;
+    const x2 = element.x2 ?? 100;
+    const y2 = element.y2 ?? 0;
+    return (
+      <Svg height={Math.abs(y2 - y1) + 20} width={Math.abs(x2 - x1) + 20}>
+        <SvgLine stroke={color} strokeLinecap="round" strokeWidth={4} x1={x1 + 10} x2={x2 + 10} y1={y1 + 10} y2={y2 + 10} />
       </Svg>
     );
   }
