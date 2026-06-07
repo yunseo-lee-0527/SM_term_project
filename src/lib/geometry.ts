@@ -86,6 +86,48 @@ export function clampPointToPaper(point: InkPoint): InkPoint {
   };
 }
 
+// ── Continuous canvas (variant B) ───────────────────────────────────────────
+// An infinite horizontal band: width is unbounded, height stays fixed at
+// PAPER_HEIGHT. The frame fits that fixed height into the stage and left-aligns
+// the page origin; horizontal travel is provided entirely by pan.x.
+export function fitBandToStage(stage: StageSize, margin = 32): PaperFrame {
+  const availableHeight = Math.max(stage.height - margin * 2, 1);
+  const scale = availableHeight / PAPER_HEIGHT;
+  const height = PAPER_HEIGHT * scale;
+
+  return {
+    x: margin,
+    y: (stage.height - height) / 2,
+    width: PAPER_WIDTH * scale, // nominal initial width — not an actual bound
+    height,
+    scale,
+  };
+}
+
+// Continuous canvas only constrains the vertical axis (the band height); x is
+// left free so ink can be placed anywhere along the infinite horizontal strip.
+export function clampPointToBand(point: InkPoint): InkPoint {
+  return {
+    ...point,
+    y: clamp(point.y, 0, PAPER_HEIGHT),
+  };
+}
+
+// Keep the fixed-height band from scrolling off-screen vertically. When the band
+// is shorter than the stage it is centred; otherwise pan.y is clamped to its edges.
+export function clampBandPanY(panY: number, frame: PaperFrame, zoom: number, stage: StageSize) {
+  const scale = frame.scale * zoom;
+  const bandHeight = PAPER_HEIGHT * scale;
+
+  if (bandHeight <= stage.height) {
+    return (stage.height - bandHeight) / 2 - frame.y;
+  }
+
+  const min = stage.height - bandHeight - frame.y;
+  const max = -frame.y;
+  return clamp(panY, min, max);
+}
+
 export function expandStrokePoints(points: InkPoint[], maxGap = 18) {
   if (points.length < 2) {
     return points;
@@ -114,7 +156,7 @@ export function expandStrokePoints(points: InkPoint[], maxGap = 18) {
   return expanded;
 }
 
-export function smoothStrokePoints(points: InkPoint[], alpha = 0.62) {
+export function smoothStrokePoints(points: InkPoint[], alpha = 0.88) {
   if (points.length < 3) {
     return points;
   }
@@ -147,13 +189,10 @@ export function getStrokeWidthAt(stroke: Stroke, pointIndex: number) {
   }
 
   const point = stroke.points[pointIndex];
-  const previous = stroke.points[Math.max(pointIndex - 1, 0)] ?? point;
-  const elapsed = Math.max(point.time - previous.time, 8);
-  const velocity = distance(point, previous) / elapsed;
-  const pressureFactor = 0.55 + clamp(point.pressure, 0.12, 1) * 0.9;
-  const speedFactor = clamp(1.22 - velocity * 0.16, 0.58, 1.1);
+  const pressure = clamp(point.pressure, 0.12, 1);
+  const pressureFactor = 1 + (pressure - 0.55) * 0.28;
 
-  return clamp(stroke.baseWidth * pressureFactor * speedFactor, stroke.baseWidth * 0.45, stroke.baseWidth * 1.65);
+  return clamp(stroke.baseWidth * pressureFactor, stroke.baseWidth * 0.88, stroke.baseWidth * 1.13);
 }
 
 export function pointToSegmentDistance(
@@ -268,6 +307,46 @@ function detectCorners(
   }
 
   return corners;
+}
+
+// Precision eraser: remove only the points the eraser disk passes over and
+// return the surviving contiguous runs (each ≥2 points so it can render). The
+// stroke is densified first so the cut lands cleanly between sparse samples.
+// Returns null when nothing was actually erased, so callers can skip a no-op.
+export function splitStrokeByEraserPath(stroke: Stroke, eraserPoints: InkPoint[], eraserRadius: number): InkPoint[][] | null {
+  if (stroke.points.length === 0 || eraserPoints.length === 0) {
+    return null;
+  }
+
+  const radius = eraserRadius + stroke.baseWidth * 0.5;
+  const dense = expandStrokePoints(stroke.points, 5);
+  const runs: InkPoint[][] = [];
+  let run: InkPoint[] = [];
+  let erasedAny = false;
+
+  for (const inkPoint of dense) {
+    const erased = eraserPoints.some((eraserPoint) => distance(eraserPoint, inkPoint) <= radius);
+
+    if (erased) {
+      erasedAny = true;
+      if (run.length >= 2) {
+        runs.push(run);
+      }
+      run = [];
+    } else {
+      run.push(inkPoint);
+    }
+  }
+
+  if (!erasedAny) {
+    return null;
+  }
+
+  if (run.length >= 2) {
+    runs.push(run);
+  }
+
+  return runs;
 }
 
 export function recognizeShape(rawPoints: InkPoint[]): RecognizedShape | null {

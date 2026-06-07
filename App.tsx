@@ -1,29 +1,68 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { StatusBar } from "expo-status-bar";
 
 import { HandwritingCanvas } from "./src/components/HandwritingCanvas";
 import { PageStrip } from "./src/components/PageStrip";
+import { SessionSetupModal, type SessionSetup } from "./src/components/SessionSetupModal";
 import { Toolbar } from "./src/components/Toolbar";
-import { recognizeShape, strokeIntersectsEraserPath, type RecognizedShape } from "./src/lib/geometry";
+import { splitStrokeByEraserPath, strokeIntersectsEraserPath } from "./src/lib/geometry";
 import {
-  appendStroke,
   appendElement,
+  appendStroke,
   createInitialNotebook,
   createPage,
   getActivePage,
+  makeId,
   pushHistory,
   redoInkAction,
+  removeElements,
+  removePage,
   removeStrokes,
+  replaceStrokes,
   undoInkAction,
   updateElement,
 } from "./src/lib/notebook";
+import { elementIntersectsEraserPath, getElementScale, getShapeGeometry, withShapeGeometry } from "./src/lib/shapePresets";
+import { endSession, exportCurrentSessionJson, hydrateLog, logEvent, startSession } from "./src/lib/sessionLog";
 import { loadNotebook, saveNotebook } from "./src/lib/storage";
-import type { DistributionKind, ElementKind, HistoryState, InkPoint, Notebook, NoteElement, Stroke, ToolMode } from "./src/types/ink";
+import { DEFAULT_VARIANT, featuresForVariant, variantFromCondition, type AppVariant } from "./src/constants/variant";
+import type { ElementKind, HistoryState, InkPoint, NoteElement, Notebook, Stroke, ToolMode } from "./src/types/ink";
 
 const INITIAL_HISTORY: HistoryState = { done: [], undone: [] };
 const DEFAULT_INK_COLOR = "#111827";
+
+type ShapeInsertKind =
+  | "normal_curve"
+  | "hyperbola"
+  | "exp_decay"
+  | "log_curve"
+  | "sin_curve"
+  | "tan_curve"
+  | "semicircle"
+  | "quadrant"
+  | "matrix"
+  | "table"
+  | "determinant";
+
+type ShapeGroup = {
+  title: string;
+  items: ShapeInsertKind[];
+};
+
+const SHAPE_GROUPS: ShapeGroup[] = [
+  {
+    title: "Note 1 set",
+    items: ["normal_curve", "exp_decay", "sin_curve", "semicircle", "matrix"],
+  },
+  {
+    title: "Note 2 set",
+    items: ["hyperbola", "log_curve", "tan_curve", "quadrant", "table", "determinant"],
+  },
+];
 
 export default function App() {
   const [notebook, setNotebook] = useState<Notebook>(() => createInitialNotebook());
@@ -33,11 +72,17 @@ export default function App() {
   const [inkColor, setInkColor] = useState(DEFAULT_INK_COLOR);
   const [inkWidth, setInkWidth] = useState(8);
   const [eraserWidth, setEraserWidth] = useState(34);
-  const [previousDrawTool, setPreviousDrawTool] = useState<ToolMode>("pen");
-  const [showElements, setShowElements] = useState(false);
+  const [eraserMode, setEraserMode] = useState<"stroke" | "precise">("stroke");
+  const [showShapePanel, setShowShapePanel] = useState(true);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
-  const [breakSeconds, setBreakSeconds] = useState(25 * 60);
-  const [breakRunning, setBreakRunning] = useState(false);
+  const [logLabel, setLogLabel] = useState<string>("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [canExport, setCanExport] = useState(false);
+  const [showSessionSetup, setShowSessionSetup] = useState(false);
+  // A/B experiment arm. A = baseline (fixed pages, no shapes); B = continuous
+  // canvas + shape insertion. Set at session start from the chosen condition.
+  const [variant, setVariant] = useState<AppVariant>(DEFAULT_VARIANT);
+  const features = useMemo(() => featuresForVariant(variant), [variant]);
 
   useEffect(() => {
     let active = true;
@@ -60,8 +105,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    hydrateLog().then(({ session, recording }) => {
+      if (active) {
+        setLogLabel(session?.meta.label ?? "");
+        setIsRecording(recording);
+        setCanExport(!!session);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isHydrated) {
-      return;
+      return undefined;
     }
 
     const timeout = setTimeout(() => {
@@ -77,61 +136,135 @@ export default function App() {
     [activePage.elements, selectedElementId],
   );
 
-  useEffect(() => {
-    if (!breakRunning) {
-      return undefined;
-    }
-
-    const interval = setInterval(() => {
-      setBreakSeconds((current) => (current <= 1 ? 5 * 60 : current - 1));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [breakRunning]);
-
   const handleAddStroke = useCallback(
     (stroke: Stroke) => {
-      if (tool === "lasso" || tool === "text") {
+      if (tool !== "pen") {
         return;
-      }
-
-      if (tool === "shape") {
-        const shape = recognizeShape(stroke.points);
-        if (shape) {
-          const element = shapeToElement(shape, inkColor);
-          setNotebook((current) => appendElement(current, activePage.id, element));
-          setSelectedElementId(element.id);
-          return;
-        }
       }
 
       const action = { type: "add-stroke", pageId: activePage.id, stroke } as const;
       setNotebook((current) => appendStroke(current, activePage.id, stroke));
       setHistory((current) => pushHistory(current, action));
+
+      const bbox = strokeBoundingBox(stroke.points);
+      logEvent({
+        type: "stroke",
+        tool: stroke.tool,
+        strokeId: stroke.id,
+        startedAt: stroke.points[0]?.time ?? Date.now(),
+        endedAt: stroke.points[stroke.points.length - 1]?.time ?? Date.now(),
+        durationMs: (stroke.points[stroke.points.length - 1]?.time ?? 0) - (stroke.points[0]?.time ?? 0),
+        pointCount: stroke.points.length,
+        bbox,
+        points: stroke.points.map((point) => [Math.round(point.x), Math.round(point.y), point.time] as [number, number, number]),
+        nearShapeIds: shapesNearBox(activePage.elements ?? [], bbox),
+      });
     },
-    [activePage.id, inkColor, tool],
+    [activePage.elements, activePage.id, tool],
   );
 
   const handleErasePath = useCallback(
     (points: InkPoint[], radius: number) => {
-      const removedStrokes = activePage.strokes.filter((stroke) => strokeIntersectsEraserPath(stroke, points, radius));
+      // Precision eraser: keep the parts of each stroke the eraser missed.
+      if (eraserMode === "precise") {
+        const affected = activePage.strokes.filter((stroke) => strokeIntersectsEraserPath(stroke, points, radius));
 
-      if (removedStrokes.length === 0) {
+        if (affected.length === 0) {
+          return;
+        }
+
+        const removed: Stroke[] = [];
+        const added: Stroke[] = [];
+        const replacements: Record<string, Stroke[]> = {};
+
+        for (const stroke of affected) {
+          const runs = splitStrokeByEraserPath(stroke, points, radius);
+          if (!runs) {
+            continue;
+          }
+          const pieces = runs.map((piecePoints) => ({ ...stroke, id: makeId("stroke"), points: piecePoints }));
+          removed.push(stroke);
+          added.push(...pieces);
+          replacements[stroke.id] = pieces;
+        }
+
+        if (removed.length === 0) {
+          return;
+        }
+
+        const action = { type: "split-strokes", pageId: activePage.id, removed, added } as const;
+        setNotebook((current) => replaceStrokes(current, activePage.id, replacements));
+        setHistory((current) => pushHistory(current, action));
+        logEvent({
+          type: "erase",
+          mode: "precise",
+          removedStrokeIds: removed.map((stroke) => stroke.id),
+          removedElementIds: [],
+          addedStrokeIds: added.map((stroke) => stroke.id),
+        });
         return;
       }
 
-      const action = { type: "erase-strokes", pageId: activePage.id, strokes: removedStrokes } as const;
+      // Stroke eraser: remove whole strokes and shape objects on contact.
+      const removedStrokes = activePage.strokes.filter((stroke) => strokeIntersectsEraserPath(stroke, points, radius));
+      const removedElements = (activePage.elements ?? []).filter((element) => elementIntersectsEraserPath(element, points, radius));
 
-      setNotebook((current) =>
-        removeStrokes(
-          current,
-          activePage.id,
-          removedStrokes.map((stroke) => stroke.id),
-        ),
-      );
-      setHistory((current) => pushHistory(current, action));
+      if (removedStrokes.length === 0 && removedElements.length === 0) {
+        return;
+      }
+
+      const strokeAction = { type: "erase-strokes", pageId: activePage.id, strokes: removedStrokes } as const;
+      const elementAction = { type: "erase-elements", pageId: activePage.id, elements: removedElements } as const;
+
+      setNotebook((current) => {
+        let next = current;
+
+        if (removedStrokes.length > 0) {
+          next = removeStrokes(
+            next,
+            activePage.id,
+            removedStrokes.map((stroke) => stroke.id),
+          );
+        }
+
+        if (removedElements.length > 0) {
+          next = removeElements(
+            next,
+            activePage.id,
+            removedElements.map((element) => element.id),
+          );
+        }
+
+        return next;
+      });
+
+      setHistory((current) => {
+        let next = current;
+
+        if (removedStrokes.length > 0) {
+          next = pushHistory(next, strokeAction);
+        }
+
+        if (removedElements.length > 0) {
+          next = pushHistory(next, elementAction);
+        }
+
+        return next;
+      });
+
+      if (removedElements.some((element) => element.id === selectedElementId)) {
+        setSelectedElementId(null);
+      }
+
+      logEvent({
+        type: "erase",
+        mode: "stroke",
+        removedStrokeIds: removedStrokes.map((stroke) => stroke.id),
+        removedElementIds: removedElements.map((element) => element.id),
+        addedStrokeIds: [],
+      });
     },
-    [activePage.id, activePage.strokes],
+    [activePage.elements, activePage.id, activePage.strokes, eraserMode, selectedElementId],
   );
 
   const handleUndo = useCallback(() => {
@@ -146,6 +279,7 @@ export default function App() {
       done: current.done.slice(0, -1),
       undone: [action, ...current.undone],
     }));
+    logEvent({ type: "history", action: "undo", kind: action.type });
   }, [history.done]);
 
   const handleRedo = useCallback(() => {
@@ -160,52 +294,59 @@ export default function App() {
       done: [...current.done, action],
       undone: current.undone.slice(1),
     }));
+    logEvent({ type: "history", action: "redo", kind: action.type });
   }, [history.undone]);
 
   const handleAddPage = useCallback(() => {
-    setNotebook((current) => {
-      const page = createPage(current.pages.length + 1);
-
-      return {
-        ...current,
-        activePageId: page.id,
-        pages: [...current.pages, page],
-        updatedAt: Date.now(),
-      };
-    });
+    const page = createPage(notebook.pages.length + 1);
+    setNotebook((current) => ({
+      ...current,
+      activePageId: page.id,
+      pages: [...current.pages, page],
+      updatedAt: Date.now(),
+    }));
     setHistory(INITIAL_HISTORY);
-  }, []);
+    logEvent({ type: "page_change", pageId: page.id });
+  }, [notebook.pages.length]);
 
   const handleToolChange = useCallback((nextTool: ToolMode) => {
-    setTool((current) => {
-      if (current === "pen" || current === "highlighter") {
-        setPreviousDrawTool(current);
-      }
-      if (nextTool === "pen" || nextTool === "highlighter") {
-        setPreviousDrawTool(nextTool);
-      }
-      return nextTool;
-    });
+    setTool(nextTool);
   }, []);
 
-  const handleQuickToggle = useCallback(() => {
-    setTool((current) => (current === "eraser" ? previousDrawTool : "eraser"));
-  }, [previousDrawTool]);
+  const handleAddShape = useCallback(
+    (kind: ShapeInsertKind) => {
+      // Shape insertion is a variant-B-only feature.
+      if (!features.shapes) {
+        return;
+      }
 
-  const handleAddElement = useCallback(
-    (kind: ElementKind) => {
-      const element = createElement(kind, inkColor, activePage.elements.length);
+      const element = createShapeElement(kind, inkColor, activePage.elements.length);
+
       setNotebook((current) => appendElement(current, activePage.id, element));
       setSelectedElementId(element.id);
+      // Enter select mode so the freshly inserted shape can be dragged/resized right away.
+      setTool("lasso");
+      logEvent({ type: "shape_insert", elementId: element.id, kind: element.kind, x: element.x, y: element.y });
     },
-    [activePage.elements.length, activePage.id, inkColor],
+    [activePage.elements.length, activePage.id, features.shapes, inkColor],
   );
 
   const handleUpdateElement = useCallback(
     (element: NoteElement) => {
+      const previous = (activePage.elements ?? []).find((item) => item.id === element.id);
+      const before = previous ? getElementScale(previous) : null;
+      const after = getElementScale(element);
+      let action: "move" | "resize" | "edit" = "edit";
+      if (before && (before.sx !== after.sx || before.sy !== after.sy)) {
+        action = "resize";
+      } else if (previous && (previous.x !== element.x || previous.y !== element.y)) {
+        action = "move";
+      }
+
       setNotebook((current) => updateElement(current, activePage.id, element));
+      logEvent({ type: "element_transform", action, elementId: element.id, x: element.x, y: element.y, scaleX: after.sx, scaleY: after.sy });
     },
-    [activePage.id],
+    [activePage.elements, activePage.id],
   );
 
   const handleSelectPage = useCallback((pageId: string) => {
@@ -214,7 +355,76 @@ export default function App() {
       activePageId: pageId,
       updatedAt: Date.now(),
     }));
+    logEvent({ type: "page_change", pageId });
   }, []);
+
+  const handleDeletePage = useCallback(
+    (pageId: string) => {
+      if (notebook.pages.length <= 1) {
+        Alert.alert("삭제 불가", "마지막 페이지는 삭제할 수 없습니다.");
+        return;
+      }
+
+      Alert.alert("페이지 삭제", "이 페이지의 모든 필기와 도형이 삭제됩니다. 계속할까요?", [
+        { text: "취소", style: "cancel" },
+        {
+          text: "삭제",
+          style: "destructive",
+          onPress: () => {
+            setNotebook((current) => removePage(current, pageId));
+            setHistory(INITIAL_HISTORY);
+            setSelectedElementId(null);
+            logEvent({ type: "page_delete", pageId });
+          },
+        },
+      ]);
+    },
+    [notebook.pages.length],
+  );
+
+  const handleStartSession = useCallback((setup: SessionSetup) => {
+    const session = startSession(setup);
+    // The session condition drives which experiment arm the app runs as.
+    setVariant(variantFromCondition(setup.condition));
+    setLogLabel(session.meta.label ?? "");
+    setIsRecording(true);
+    setCanExport(true);
+    setShowSessionSetup(false);
+  }, []);
+
+  const handleEndSession = useCallback(() => {
+    endSession();
+    setIsRecording(false);
+  }, []);
+
+  const handleExportLog = useCallback(async () => {
+    const json = exportCurrentSessionJson();
+    if (!json) {
+      Alert.alert("내보낼 로그 없음", "아직 기록된 세션이 없습니다.");
+      return;
+    }
+
+    try {
+      const safeLabel = (logLabel || "session").replace(/[^\w가-힣-]+/g, "_");
+      const filename = `studyflow-${safeLabel}-${Date.now()}.json`;
+      const file = new File(Paths.cache, filename);
+      file.create({ overwrite: true, intermediates: true });
+      file.write(json);
+
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert("공유 불가", "이 기기에서 파일 공유를 사용할 수 없습니다.");
+        return;
+      }
+
+      await Sharing.shareAsync(file.uri, {
+        mimeType: "application/json",
+        UTI: "public.json",
+        dialogTitle: "로그 파일 내보내기",
+      });
+    } catch (error) {
+      Alert.alert("내보내기 실패", String(error));
+    }
+  }, [logLabel]);
 
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -224,29 +434,42 @@ export default function App() {
           canRedo={history.undone.length > 0}
           canUndo={history.done.length > 0}
           color={inkColor}
+          eraserMode={eraserMode}
           eraserWidth={eraserWidth}
+          canExport={canExport}
+          isRecording={isRecording}
           onColorChange={setInkColor}
+          onEndSession={handleEndSession}
+          onEraserModeChange={setEraserMode}
           onEraserWidthChange={setEraserWidth}
-          onOpenElements={() => setShowElements((current) => !current)}
-          onQuickToggle={handleQuickToggle}
+          onExportLog={handleExportLog}
+          onOpenElements={() => setShowShapePanel((current) => !current)}
           onRedo={handleRedo}
+          onStartSession={() => setShowSessionSetup(true)}
           onToolChange={handleToolChange}
           onUndo={handleUndo}
           onWidthChange={setInkWidth}
+          sessionLabel={logLabel}
+          showShapeTool={features.shapes}
           tool={tool}
           width={inkWidth}
         />
         <View style={styles.workspace}>
-          <PageStrip
-            activePageId={notebook.activePageId}
-            onAddPage={handleAddPage}
-            onSelectPage={handleSelectPage}
-            pages={notebook.pages}
-          />
+          {features.multiPage ? (
+            <PageStrip
+              activePageId={notebook.activePageId}
+              onAddPage={handleAddPage}
+              onDeletePage={handleDeletePage}
+              onSelectPage={handleSelectPage}
+              pages={notebook.pages}
+            />
+          ) : null}
           <HandwritingCanvas
-            key={activePage.id}
+            key={`${activePage.id}-${variant}`}
+            continuous={features.continuousCanvas}
             onAddStroke={handleAddStroke}
             onErasePath={handleErasePath}
+            onNavigate={(event) => logEvent(event)}
             onSelectElement={setSelectedElementId}
             onUpdateElement={handleUpdateElement}
             page={activePage}
@@ -258,255 +481,183 @@ export default function App() {
             }}
           />
         </View>
-        {showElements ? (
-          <ElementPanel
-            breakRunning={breakRunning}
-            breakSeconds={breakSeconds}
+        {features.shapes && showShapePanel ? (
+          <ShapePanel
             element={selectedElement}
-            onAddElement={handleAddElement}
-            onBreakSecondsChange={setBreakSeconds}
-            onBreakToggle={() => setBreakRunning((current) => !current)}
-            onClose={() => setShowElements(false)}
-            onResetBreak={() => {
-              setBreakRunning(false);
-              setBreakSeconds(25 * 60);
-            }}
+            onAddShape={handleAddShape}
+            onClose={() => setShowShapePanel(false)}
             onUpdateElement={handleUpdateElement}
           />
+        ) : null}
+        {showSessionSetup ? (
+          <SessionSetupModal onCancel={() => setShowSessionSetup(false)} onStart={handleStartSession} visible />
         ) : null}
       </SafeAreaView>
     </GestureHandlerRootView>
   );
 }
 
-function shapeToElement(shape: RecognizedShape, color: string): NoteElement {
-  const id = `element-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const PAD = 10;
+function createShapeElement(kind: ShapeInsertKind, color: string, index: number): NoteElement {
+  const column = index % 3;
+  const row = Math.floor(index / 3) % 5;
+  const isGridShape = kind === "matrix" || kind === "table" || kind === "determinant";
 
-  if (shape.kind === "circle") {
-    return { id, kind: "circle", x: shape.cx - shape.r - PAD, y: shape.cy - shape.r - PAD, color, radius: shape.r };
-  }
-
-  if (shape.kind === "rect") {
-    return { id, kind: "rect", x: shape.x - PAD, y: shape.y - PAD, color, shapeW: shape.w, shapeH: shape.h };
-  }
-
-  if (shape.kind === "triangle") {
-    const xs = shape.pts.map(([x]) => x);
-    const ys = shape.pts.map(([, y]) => y);
-    const ox = Math.min(...xs) - PAD;
-    const oy = Math.min(...ys) - PAD;
-    return { id, kind: "triangle", x: ox, y: oy, color, pts: shape.pts.map(([x, y]) => [x - ox, y - oy]) };
-  }
-
-  const ox = Math.min(shape.x1, shape.x2) - PAD;
-  const oy = Math.min(shape.y1, shape.y2) - PAD;
-  return {
-    id,
-    kind: "line_drawn",
-    x: ox,
-    y: oy,
-    color,
-    x1: shape.x1 - ox,
-    y1: shape.y1 - oy,
-    x2: shape.x2 - ox,
-    y2: shape.y2 - oy,
-  };
-}
-
-function createElement(kind: ElementKind, color: string, index: number): NoteElement {
-  return {
-    id: `element-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+  return withShapeGeometry({
+    id: makeId("shape"),
     kind,
-    x: 260 + (index % 3) * 36,
-    y: 190 + (index % 5) * 70,
+    x: 230 + column * 44,
+    y: 165 + row * 74,
     color,
-    length: 220,
-    rows: 3,
-    cols: 3,
-    dimension: 2,
-    distribution: "normal",
-    expression: "sin(x)",
-    x1: 30,
-    y1: 120,
-    x2: 220,
-    y2: 42,
-  };
+    length: isGridShape ? 190 : 230,
+    rows: isGridShape ? 3 : undefined,
+    cols: isGridShape ? 3 : undefined,
+    objectScale: 1,
+    radius: kind === "semicircle" || kind === "quadrant" ? 62 : undefined,
+  });
 }
 
-function ElementPanel({
+function strokeBoundingBox(points: InkPoint[]) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+
+  if (!Number.isFinite(minX)) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  }
+
+  return { minX: Math.round(minX), minY: Math.round(minY), maxX: Math.round(maxX), maxY: Math.round(maxY) };
+}
+
+// Inserted shapes whose (padded) bounding box overlaps the stroke — feeds the
+// pause classifier signal "did ink land near a shape region" (design doc §7).
+function shapesNearBox(elements: NoteElement[], bbox: { minX: number; minY: number; maxX: number; maxY: number }, pad = 40) {
+  return elements
+    .filter((element) => {
+      const geometry = getShapeGeometry(element);
+      const { sx, sy } = getElementScale(element);
+      const ex1 = element.x - pad;
+      const ey1 = element.y - pad;
+      const ex2 = element.x + geometry.width * sx + pad;
+      const ey2 = element.y + geometry.height * sy + pad;
+      return bbox.minX <= ex2 && bbox.maxX >= ex1 && bbox.minY <= ey2 && bbox.maxY >= ey1;
+    })
+    .map((element) => element.id);
+}
+
+function ShapePanel({
   element,
-  breakSeconds,
-  breakRunning,
-  onAddElement,
+  onAddShape,
   onUpdateElement,
   onClose,
-  onBreakToggle,
-  onResetBreak,
-  onBreakSecondsChange,
 }: {
   element: NoteElement | null;
-  breakSeconds: number;
-  breakRunning: boolean;
-  onAddElement: (kind: ElementKind) => void;
+  onAddShape: (kind: ShapeInsertKind) => void;
   onUpdateElement: (element: NoteElement) => void;
   onClose: () => void;
-  onBreakToggle: () => void;
-  onResetBreak: () => void;
-  onBreakSecondsChange: (seconds: number) => void;
 }) {
-  const controls = element ? controlsForElement(element.kind) : [];
-  const minutes = Math.floor(breakSeconds / 60);
-  const seconds = String(breakSeconds % 60).padStart(2, "0");
+  const canResizeGrid = element?.kind === "matrix" || element?.kind === "table" || element?.kind === "determinant";
 
-  const update = (patch: Partial<NoteElement>) => {
+  const updateSelected = (patch: Partial<NoteElement>) => {
     if (element) {
-      onUpdateElement({ ...element, ...patch });
+      onUpdateElement(withShapeGeometry({ ...element, ...patch }));
     }
   };
 
   return (
-    <View style={styles.elementPanel}>
+    <View style={styles.shapePanel}>
       <View style={styles.panelHeader}>
-        <Text style={styles.panelTitle}>Elements</Text>
-        <Pressable onPress={onClose} style={styles.closeButton}>
-          <Text style={styles.closeText}>×</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.elementButtons}>
-        {(["axis", "distribution", "function", "vector", "matrix", "table"] as ElementKind[]).map((kind) => (
-          <Pressable key={kind} onPress={() => onAddElement(kind)} style={styles.elementButton}>
-            <Text style={styles.elementButtonText}>{elementLabel(kind)}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {element ? (
-        <View style={styles.editorBlock}>
-          <Text style={styles.editorTitle}>{elementLabel(element.kind)} 조정</Text>
-          {controls.includes("length") ? (
-            <NumberStepper label="길이" max={320} min={80} onChange={(value) => update({ length: value })} value={element.length ?? 220} />
-          ) : null}
-          {controls.includes("axis") ? (
-            <ChoiceRow
-              label="축"
-              onChange={(value) => update({ dimension: Number(value) as 1 | 2 | 3 })}
-              options={["1", "2", "3"]}
-              value={String(element.dimension ?? 2)}
-            />
-          ) : null}
-          {controls.includes("distribution") ? (
-            <ChoiceRow
-              label="분포"
-              onChange={(value) => update({ distribution: value as DistributionKind })}
-              options={["normal", "uniform", "exponential", "bimodal", "skewed"]}
-              value={element.distribution ?? "normal"}
-            />
-          ) : null}
-          {controls.includes("function") ? (
-            <TextInput
-              onChangeText={(value) => update({ expression: value })}
-              placeholder="sin(x), x^2, cos(x)"
-              style={styles.textInput}
-              value={element.expression ?? "sin(x)"}
-            />
-          ) : null}
-          {controls.includes("grid") ? (
-            <View style={styles.rowControls}>
-              <NumberStepper label="행" max={8} min={1} onChange={(value) => update({ rows: value })} value={element.rows ?? 3} />
-              <NumberStepper label="열" max={8} min={1} onChange={(value) => update({ cols: value })} value={element.cols ?? 3} />
-            </View>
-          ) : null}
-          <ChoiceRow
-            label="색"
-            onChange={(value) => update({ color: value })}
-            options={["#111827", "#2563eb", "#ef4444", "#16a34a", "#f59e0b"]}
-            value={element.color}
-          />
+        <View>
+          <Text style={styles.panelTitle}>Shape objects</Text>
+          <Text style={styles.panelSubtitle}>Insert only the experiment targets.</Text>
         </View>
-      ) : (
-        <Text style={styles.helpText}>요소를 추가하거나 노트 위 요소를 누르면 필요한 설정만 표시됩니다.</Text>
-      )}
-
-      <View style={styles.timerBlock}>
-        <Text style={styles.editorTitle}>휴식 타이머</Text>
-        <Pressable
-          onLongPress={() => onBreakSecondsChange(Math.max(60, breakSeconds + 5 * 60))}
-          onPress={onBreakToggle}
-          style={styles.timerFace}
-        >
-          <Text style={styles.timerText}>{minutes}:{seconds}</Text>
-          <Text style={styles.timerHint}>{breakRunning ? "진행 중" : "탭 시작/정지 · 길게 5분 추가"}</Text>
-        </Pressable>
-        <Pressable onPress={onResetBreak} style={styles.resetTimer}>
-          <Text style={styles.resetTimerText}>25:00 초기화</Text>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.closeButton}>
+          <Text style={styles.closeText}>x</Text>
         </Pressable>
       </View>
+
+      <ScrollView contentContainerStyle={styles.panelScroll} showsVerticalScrollIndicator={false}>
+        {SHAPE_GROUPS.map((group) => (
+          <View key={group.title} style={styles.shapeGroup}>
+            <Text style={styles.groupTitle}>{group.title}</Text>
+            <View style={styles.shapeButtons}>
+              {group.items.map((kind) => (
+                <Pressable accessibilityRole="button" key={kind} onPress={() => onAddShape(kind)} style={styles.shapeButton}>
+                  <Text style={styles.shapeButtonText}>{shapeLabel(kind)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ))}
+
+        {element ? (
+          <View style={styles.selectedBlock}>
+            <Text style={styles.groupTitle}>Selected</Text>
+            <Text style={styles.selectedName}>{shapeLabel(element.kind)}</Text>
+
+            {canResizeGrid ? (
+              <View style={styles.stepperRow}>
+                <NumberStepper label="Rows" max={6} min={1} onChange={(rows) => updateSelected({ rows })} value={element.rows ?? 3} />
+                <NumberStepper label="Cols" max={6} min={1} onChange={(cols) => updateSelected({ cols })} value={element.cols ?? 3} />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </ScrollView>
     </View>
   );
 }
 
-function controlsForElement(kind: ElementKind): string[] {
-  const map: Partial<Record<ElementKind, string[]>> = {
-    axis: ["length", "axis"],
-    distribution: ["length", "distribution"],
-    function: ["length", "function"],
-    vector: [],
-    matrix: ["grid"],
-    table: ["length", "grid"],
-    circle: [],
-    rect: [],
-    triangle: [],
-    line_drawn: [],
-  };
-  return map[kind] ?? [];
-}
-
-function elementLabel(kind: ElementKind): string {
-  const map: Partial<Record<ElementKind, string>> = {
-    axis: "좌표축",
-    distribution: "분포",
-    function: "함수",
-    vector: "벡터",
-    matrix: "행렬",
-    table: "표",
-    circle: "원",
-    rect: "사각형",
-    triangle: "삼각형",
-    line_drawn: "직선",
-  };
-  return map[kind] ?? kind;
-}
-
-function NumberStepper({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+function NumberStepper({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
   return (
     <View style={styles.stepper}>
       <Text style={styles.stepperLabel}>{label}</Text>
-      <Pressable onPress={() => onChange(Math.max(min, value - 1))} style={styles.stepperButton}>
-        <Text style={styles.stepperText}>−</Text>
+      <Pressable accessibilityRole="button" onPress={() => onChange(Math.max(min, value - 1))} style={styles.stepperButton}>
+        <Text style={styles.stepperText}>-</Text>
       </Pressable>
       <Text style={styles.stepperValue}>{value}</Text>
-      <Pressable onPress={() => onChange(Math.min(max, value + 1))} style={styles.stepperButton}>
-        <Text style={styles.stepperText}>＋</Text>
+      <Pressable accessibilityRole="button" onPress={() => onChange(Math.min(max, value + 1))} style={styles.stepperButton}>
+        <Text style={styles.stepperText}>+</Text>
       </Pressable>
     </View>
   );
 }
 
-function ChoiceRow({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
-  return (
-    <View style={styles.choiceRow}>
-      <Text style={styles.stepperLabel}>{label}</Text>
-      <View style={styles.choiceOptions}>
-        {options.map((option) => (
-          <Pressable key={option} onPress={() => onChange(option)} style={[styles.choiceButton, value === option && styles.choiceButtonActive]}>
-            <Text style={[styles.choiceText, value === option && styles.choiceTextActive]}>{option}</Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  );
+function shapeLabel(kind: ElementKind) {
+  const labels: Partial<Record<ElementKind, string>> = {
+    normal_curve: "Normal curve",
+    hyperbola: "Hyperbola",
+    exp_decay: "Exp. decay",
+    log_curve: "Log curve",
+    sin_curve: "Sin curve",
+    tan_curve: "Tan curve",
+    semicircle: "Semicircle",
+    quadrant: "Quadrant",
+    matrix: "Matrix",
+    table: "Table",
+    determinant: "Determinant",
+  };
+
+  return labels[kind] ?? kind;
 }
 
 const styles = StyleSheet.create({
@@ -522,78 +673,97 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     minHeight: 0,
   },
-  elementPanel: {
+  shapePanel: {
     position: "absolute",
     top: 96,
     right: 16,
     width: 330,
     maxHeight: "82%",
     padding: 14,
-    borderRadius: 18,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "#dbe3ed",
-    backgroundColor: "rgba(255,255,255,0.97)",
+    backgroundColor: "rgba(255,255,255,0.98)",
     shadowColor: "#0f172a",
     shadowOpacity: 0.16,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
-    gap: 12,
   },
   panelHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 10,
   },
   panelTitle: {
     color: "#111827",
     fontSize: 18,
     fontWeight: "800",
   },
+  panelSubtitle: {
+    marginTop: 2,
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   closeButton: {
     width: 32,
     height: 32,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: "#f1f5f9",
   },
   closeText: {
     color: "#475569",
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "800",
   },
-  elementButtons: {
+  panelScroll: {
+    gap: 14,
+    paddingTop: 14,
+    paddingBottom: 4,
+  },
+  shapeGroup: {
+    gap: 8,
+  },
+  groupTitle: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  shapeButtons: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
-  elementButton: {
+  shapeButton: {
+    minWidth: 96,
     paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
     backgroundColor: "#eff6ff",
   },
-  elementButtonText: {
+  shapeButtonText: {
     color: "#1d4ed8",
+    fontSize: 12,
     fontWeight: "800",
   },
-  editorBlock: {
-    gap: 10,
-    paddingTop: 10,
+  selectedBlock: {
+    gap: 8,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "#e2e8f0",
   },
-  editorTitle: {
+  selectedName: {
     color: "#111827",
     fontSize: 15,
     fontWeight: "800",
   },
-  helpText: {
-    color: "#64748b",
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  rowControls: {
+  stepperRow: {
     gap: 8,
   },
   stepper: {
@@ -612,7 +782,7 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 9,
+    borderRadius: 8,
     backgroundColor: "#f1f5f9",
   },
   stepperText: {
@@ -624,72 +794,6 @@ const styles = StyleSheet.create({
     width: 48,
     color: "#111827",
     textAlign: "center",
-    fontWeight: "800",
-  },
-  choiceRow: {
-    gap: 7,
-  },
-  choiceOptions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-  choiceButton: {
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 9,
-    backgroundColor: "#f1f5f9",
-  },
-  choiceButtonActive: {
-    backgroundColor: "#2563eb",
-  },
-  choiceText: {
-    color: "#475569",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  choiceTextActive: {
-    color: "#ffffff",
-  },
-  textInput: {
-    minHeight: 40,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    color: "#111827",
-    fontWeight: "700",
-  },
-  timerBlock: {
-    gap: 8,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#e2e8f0",
-  },
-  timerFace: {
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: "#f8fafc",
-  },
-  timerText: {
-    color: "#111827",
-    fontSize: 30,
-    fontWeight: "900",
-  },
-  timerHint: {
-    color: "#64748b",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  resetTimer: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: "#eef2ff",
-  },
-  resetTimerText: {
-    color: "#3730a3",
     fontWeight: "800",
   },
 });

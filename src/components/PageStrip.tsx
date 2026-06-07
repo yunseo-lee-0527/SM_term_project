@@ -1,4 +1,4 @@
-import { FilePlus2 } from "lucide-react-native";
+import { FilePlus2, Trash2 } from "lucide-react-native";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { Page } from "../types/ink";
@@ -9,9 +9,12 @@ type PageStripProps = {
   activePageId: string;
   onAddPage: () => void;
   onSelectPage: (pageId: string) => void;
+  onDeletePage: (pageId: string) => void;
 };
 
-export function PageStrip({ pages, activePageId, onAddPage, onSelectPage }: PageStripProps) {
+export function PageStrip({ pages, activePageId, onAddPage, onSelectPage, onDeletePage }: PageStripProps) {
+  const canDelete = pages.length > 1;
+
   return (
     <View style={styles.strip}>
       <IconButton accessibilityLabel="페이지 추가" icon={FilePlus2} onPress={onAddPage} style={styles.addButton} />
@@ -20,24 +23,36 @@ export function PageStrip({ pages, activePageId, onAddPage, onSelectPage }: Page
           const active = page.id === activePageId;
 
           return (
-            <Pressable
-              accessibilityLabel={`${index + 1} 페이지`}
-              accessibilityRole="button"
-              key={page.id}
-              onPress={() => onSelectPage(page.id)}
-              style={({ pressed }) => [
-                styles.thumbnail,
-                active && styles.activeThumbnail,
-                pressed && styles.pressedThumbnail,
-              ]}
-            >
-              <View style={styles.paperMini}>
-                <View style={[styles.miniLine, { width: "66%" }]} />
-                <View style={[styles.miniLine, { width: "52%" }]} />
-                <View style={[styles.strokeCounter, page.strokes.length > 0 && styles.hasInk]} />
-              </View>
-              <Text style={[styles.pageNumber, active && styles.activePageNumber]}>{index + 1}</Text>
-            </Pressable>
+            <View key={page.id} style={styles.thumbnailWrap}>
+              <Pressable
+                accessibilityLabel={`${index + 1} 페이지`}
+                accessibilityRole="button"
+                onPress={() => onSelectPage(page.id)}
+                style={({ pressed }) => [
+                  styles.thumbnail,
+                  active && styles.activeThumbnail,
+                  pressed && styles.pressedThumbnail,
+                ]}
+              >
+                <View style={styles.paperMini}>
+                  <View style={[styles.miniLine, { width: "66%" }]} />
+                  <View style={[styles.miniLine, { width: "52%" }]} />
+                  <View style={[styles.strokeCounter, page.strokes.length > 0 && styles.hasInk]} />
+                </View>
+                <Text style={[styles.pageNumber, active && styles.activePageNumber]}>{index + 1}</Text>
+              </Pressable>
+              {canDelete ? (
+                <Pressable
+                  accessibilityLabel={`${index + 1} 페이지 삭제`}
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => onDeletePage(page.id)}
+                  style={({ pressed }) => [styles.deleteButton, pressed && styles.deletePressed]}
+                >
+                  <Trash2 color="#ffffff" size={13} strokeWidth={2.6} />
+                </Pressable>
+              ) : null}
+            </View>
           );
         })}
       </ScrollView>
@@ -61,6 +76,25 @@ const styles = StyleSheet.create({
   list: {
     gap: 12,
     paddingBottom: 24,
+  },
+  thumbnailWrap: {
+    position: "relative",
+  },
+  deleteButton: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: "#ef4444",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+  },
+  deletePressed: {
+    opacity: 0.7,
   },
   thumbnail: {
     alignItems: "center",

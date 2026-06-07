@@ -4,17 +4,21 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "start:tunnel": "expo start --tunnel",
+    "start:tunnel": "node scripts/start-expo-tunnel.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "postinstall": "node scripts/patch-expo-ngrok.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@expo/ngrok": "^4.1.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@shopify/react-native-skia": "2.2.12",
-    "expo": "~54.0.33",
+    "expo": "~54.0.0",
+    "expo-file-system": "~19.0.23",
+    "expo-sharing": "~14.0.8",
     "expo-status-bar": "~3.0.9",
     "lucide-react-native": "^1.16.0",
     "react": "19.1.0",

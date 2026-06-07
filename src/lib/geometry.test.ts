@@ -7,6 +7,7 @@ import {
   getStrokeWidthAt,
   pointToSegmentDistance,
   screenToPage,
+  splitStrokeByEraserPath,
   strokeIntersectsEraserPath,
 } from "./geometry";
 
@@ -65,5 +66,30 @@ describe("geometry", () => {
     const heavyStroke = stroke([point(0, 0, 1, 0), point(12, 0, 1, 16)]);
 
     expect(getStrokeWidthAt(heavyStroke, 1)).toBeGreaterThan(getStrokeWidthAt(lightStroke, 1));
+  });
+});
+
+describe("splitStrokeByEraserPath (precision eraser)", () => {
+  it("splits a stroke into two pieces when erased in the middle", () => {
+    const inkStroke = stroke([point(10, 10), point(400, 10)]);
+    const runs = splitStrokeByEraserPath(inkStroke, [point(200, 10)], 10);
+
+    expect(runs).not.toBeNull();
+    expect(runs).toHaveLength(2);
+    expect(runs![0][runs![0].length - 1].x).toBeLessThan(200);
+    expect(runs![1][0].x).toBeGreaterThan(200);
+  });
+
+  it("returns null when the eraser misses the stroke", () => {
+    const inkStroke = stroke([point(10, 10), point(400, 10)]);
+
+    expect(splitStrokeByEraserPath(inkStroke, [point(200, 90)], 10)).toBeNull();
+  });
+
+  it("returns no surviving pieces when the whole stroke is erased", () => {
+    const inkStroke = stroke([point(10, 10), point(30, 10)]);
+    const runs = splitStrokeByEraserPath(inkStroke, [point(20, 10)], 40);
+
+    expect(runs).toEqual([]);
   });
 });
