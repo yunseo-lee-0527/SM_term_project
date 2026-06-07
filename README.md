@@ -57,6 +57,13 @@ npm run start:tunnel
 npm run start:tunnel -- -c
 ```
 
+### iPad 접속 문제 해결
+
+- 터널 URL은 오래 켜두면 끊길 수 있으므로, 문제가 생기면 기존 QR 대신 새로 띄운 QR을 사용합니다.
+- Expo Go에서 이전 프로젝트가 계속 열리면 앱을 완전히 종료한 뒤 새 QR을 다시 스캔합니다.
+- 노트북이 절전 모드에 들어가거나 Wi-Fi/VPN이 바뀌면 Metro와 터널 연결이 끊길 수 있습니다.
+- 같은 Wi-Fi에 붙어 있는 iPad라면 터널보다 기본 LAN 실행(`npm start`)이 더 안정적입니다.
+
 ## 검증
 
 타입 체크:
