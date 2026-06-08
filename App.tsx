@@ -79,8 +79,8 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [canExport, setCanExport] = useState(false);
   const [showSessionSetup, setShowSessionSetup] = useState(false);
-  // A/B experiment arm. A = baseline (fixed pages, no shapes); B = continuous
-  // canvas + shape insertion. Set at session start from the chosen condition.
+  // A/B experiment arm. A = baseline (no shapes); B = shape insertion enabled.
+  // Both arms share the page-based canvas. Set at session start from the condition.
   const [variant, setVariant] = useState<AppVariant>(DEFAULT_VARIANT);
   const features = useMemo(() => featuresForVariant(variant), [variant]);
 
@@ -466,7 +466,6 @@ export default function App() {
           ) : null}
           <HandwritingCanvas
             key={`${activePage.id}-${variant}`}
-            continuous={features.continuousCanvas}
             onAddStroke={handleAddStroke}
             onErasePath={handleErasePath}
             onNavigate={(event) => logEvent(event)}

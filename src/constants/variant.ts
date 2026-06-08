@@ -2,24 +2,22 @@
 // switches behaviour at runtime from the session condition picked in the
 // SessionSetupModal, so the same participant can run both arms (counterbalancing).
 //
-//   A (baseline)  — fixed rectangular pages, no shape insertion.
-//   B (improved)  — shape insertion + an infinite horizontal "continuous canvas"
-//                   that replaces the discrete multi-page model.
+//   A (baseline)  — no shape insertion.
+//   B (improved)  — shape insertion enabled.
+// Both arms share the same discrete multi-page canvas.
 
 export type AppVariant = "A" | "B";
 
 export type FeatureFlags = {
   // Insert STEM shape objects (ShapePanel + Shapes tool).
   shapes: boolean;
-  // Single surface that extends infinitely left/right (fixed height).
-  continuousCanvas: boolean;
   // Discrete rectangular pages with the left-hand PageStrip.
   multiPage: boolean;
 };
 
 const FEATURES: Record<AppVariant, FeatureFlags> = {
-  A: { shapes: false, continuousCanvas: false, multiPage: true },
-  B: { shapes: true, continuousCanvas: true, multiPage: false },
+  A: { shapes: false, multiPage: true },
+  B: { shapes: true, multiPage: true },
 };
 
 export const DEFAULT_VARIANT: AppVariant = "A";

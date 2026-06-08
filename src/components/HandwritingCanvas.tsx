@@ -3,15 +3,12 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
-import { GRID_SPACING, PAPER_HEIGHT, PAPER_WIDTH } from "../constants/paper";
+import { PAPER_HEIGHT, PAPER_WIDTH } from "../constants/paper";
 import {
   clamp,
-  clampBandPanY,
-  clampPointToBand,
   clampPointToPaper,
   createGridLines,
   distance,
-  fitBandToStage,
   fitPaperToStage,
   isInsidePaper,
   screenToPage,
@@ -34,8 +31,6 @@ type HandwritingCanvasProps = {
   page: Page;
   toolSettings: ToolSettings;
   selectedElementId?: string | null;
-  // Variant B: infinite horizontal band instead of the fixed rectangular paper.
-  continuous?: boolean;
   onAddStroke: (stroke: Stroke) => void;
   onErasePath: (points: InkPoint[], radius: number) => void;
   onSelectElement?: (elementId: string | null) => void;
@@ -163,7 +158,6 @@ type CanvasApi = {
   stage: StageSize | null;
   zoom: number;
   pan: PanState;
-  continuous: boolean;
   elements: NoteElement[];
   selectedElementId: string | null;
   onSelect?: (elementId: string | null) => void;
@@ -179,7 +173,6 @@ export function HandwritingCanvas({
   page,
   toolSettings,
   selectedElementId,
-  continuous = false,
   onAddStroke,
   onErasePath,
   onSelectElement,
@@ -209,14 +202,8 @@ export function HandwritingCanvas({
     }
 
     const margin = stage.width > 860 ? 54 : 24;
-    return continuous ? fitBandToStage(stage, margin) : fitPaperToStage(stage, margin);
-  }, [continuous, stage]);
-
-  // Switching variants changes the coordinate model, so start the view fresh.
-  useEffect(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, [continuous]);
+    return fitPaperToStage(stage, margin);
+  }, [stage]);
 
   useEffect(() => {
     draftRef.current = null;
@@ -245,13 +232,7 @@ export function HandwritingCanvas({
         panY: pan.y,
       });
 
-      // Continuous canvas only bounds the vertical axis (the fixed band height);
-      // x extends infinitely so any horizontal position is valid.
-      if (continuous) {
-        if (rawPoint.y < -42 || rawPoint.y > PAPER_HEIGHT + 42) {
-          return null;
-        }
-      } else if (!isInsidePaper(rawPoint, 42)) {
+      if (!isInsidePaper(rawPoint, 42)) {
         return null;
       }
 
@@ -266,9 +247,9 @@ export function HandwritingCanvas({
         pointerType: event.pointerType === undefined ? "touch" : String(event.pointerType),
       };
 
-      return continuous ? clampPointToBand(enriched) : clampPointToPaper(enriched);
+      return clampPointToPaper(enriched);
     },
-    [continuous, frame, pan.x, pan.y, zoom],
+    [frame, pan.x, pan.y, zoom],
   );
 
   const buildDraftStroke = useCallback(
@@ -340,7 +321,6 @@ export function HandwritingCanvas({
     stage,
     zoom,
     pan,
-    continuous,
     elements: page.elements ?? [],
     selectedElementId: selectedElementId ?? null,
     onSelect: onSelectElement,
@@ -520,8 +500,7 @@ export function HandwritingCanvas({
         it.changed = true;
         applyLive({
           ...it.base,
-          // Continuous canvas: x is unbounded; only the fixed band height clamps y.
-          x: api.continuous ? it.base.x + dx : clamp(it.base.x + dx, 0, maxX),
+          x: clamp(it.base.x + dx, 0, maxX),
           y: clamp(it.base.y + dy, 0, maxY),
         });
         return;
@@ -577,7 +556,7 @@ export function HandwritingCanvas({
       it.changed = true;
       applyLive({
         ...it.base,
-        x: api.continuous ? newX : clamp(newX, 0, Math.max(0, PAPER_WIDTH - newW)),
+        x: clamp(newX, 0, Math.max(0, PAPER_WIDTH - newW)),
         y: clamp(newY, 0, Math.max(0, PAPER_HEIGHT - newH)),
         scaleX: nextSx,
         scaleY: nextSy,
@@ -643,17 +622,8 @@ export function HandwritingCanvas({
           panStartRef.current = apiRef.current?.pan ?? { x: 0, y: 0 };
         })
         .onUpdate((event) => {
-          const api = apiRef.current;
           const nextX = panStartRef.current.x + event.translationX;
           const nextY = panStartRef.current.y + event.translationY;
-
-          // Continuous canvas pans freely along x but the fixed-height band must
-          // stay on screen, so y is clamped to its edges.
-          if (api?.continuous && api.frame && api.stage) {
-            setPan({ x: nextX, y: clampBandPanY(nextY, api.frame, api.zoom, api.stage) });
-            return;
-          }
-
           setPan({ x: nextX, y: nextY });
         })
         .onEnd(() => {
@@ -680,14 +650,6 @@ export function HandwritingCanvas({
         .onUpdate((event) => {
           const nextZoom = clamp(zoomStartRef.current * event.scale, 0.72, 3.4);
           setZoom(nextZoom);
-
-          // Keep the fixed-height band anchored on screen as it scales.
-          const api = apiRef.current;
-          if (api?.continuous && api.frame && api.stage) {
-            const frameRef = api.frame;
-            const stageRef = api.stage;
-            setPan((current) => ({ x: current.x, y: clampBandPanY(current.y, frameRef, nextZoom, stageRef) }));
-          }
         })
         .onEnd(() => {
           const to = apiRef.current?.zoom;
@@ -707,39 +669,6 @@ export function HandwritingCanvas({
   const transform = useMemo(() => buildSkiaTransform(frame, zoom, pan), [frame, pan, zoom]);
   const pageScale = frame ? frame.scale * zoom : 1;
 
-  // Continuous canvas grid: regenerated to span the currently visible x range as
-  // the band is panned, since there is no fixed paper to pre-tile.
-  const continuousGrid = useMemo(() => {
-    if (!continuous || !frame || !stage || page.background !== "grid") {
-      return null;
-    }
-
-    const scale = frame.scale * zoom;
-    const leftPage = (0 - frame.x - pan.x) / scale;
-    const rightPage = (stage.width - frame.x - pan.x) / scale;
-    const startX = Math.floor(leftPage / GRID_SPACING - 1) * GRID_SPACING;
-    const endX = Math.ceil(rightPage / GRID_SPACING + 1) * GRID_SPACING;
-
-    const verticals: number[] = [];
-    for (let x = startX; x <= endX; x += GRID_SPACING) {
-      verticals.push(x);
-    }
-    const horizontals: number[] = [];
-    for (let y = 0; y <= PAPER_HEIGHT; y += GRID_SPACING) {
-      horizontals.push(y);
-    }
-
-    return { verticals, horizontals, startX, endX };
-  }, [continuous, frame, pan.x, page.background, stage, zoom]);
-
-  // Screen-space band fill (full width = the infinite horizontal feel).
-  const bandRect = useMemo(() => {
-    if (!continuous || !frame || !stage) {
-      return null;
-    }
-    return { y: frame.y + pan.y, height: PAPER_HEIGHT * frame.scale * zoom };
-  }, [continuous, frame, pan.y, stage, zoom]);
-
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     setStage({
       width: event.nativeEvent.layout.width,
@@ -757,57 +686,23 @@ export function HandwritingCanvas({
             <Canvas style={StyleSheet.absoluteFill}>
               {stage ? <Rect x={0} y={0} width={stage.width} height={stage.height} color="#e9eef3" /> : null}
 
-              {/* Continuous canvas: full-width band fill drawn in screen space. */}
-              {continuous && stage && bandRect ? (
-                <Rect x={0} y={bandRect.y} width={stage.width} height={bandRect.height} color="#fffdf7" />
-              ) : null}
-
               {frame ? (
                 <Group transform={transform}>
-                  {continuous ? (
-                    continuousGrid
-                      ? [
-                          ...continuousGrid.verticals.map((x, index) => (
-                            <Line
-                              color="#d9e9ef"
-                              key={`vgrid-${index}`}
-                              opacity={0.75}
-                              p1={{ x, y: 0 }}
-                              p2={{ x, y: PAPER_HEIGHT }}
-                              strokeWidth={1.2}
-                            />
-                          )),
-                          ...continuousGrid.horizontals.map((y, index) => (
-                            <Line
-                              color="#d9e9ef"
-                              key={`hgrid-${index}`}
-                              opacity={0.75}
-                              p1={{ x: continuousGrid.startX, y }}
-                              p2={{ x: continuousGrid.endX, y }}
-                              strokeWidth={1.2}
-                            />
-                          )),
-                        ]
-                      : null
-                  ) : (
-                    <>
-                      <Rect x={10} y={12} width={PAPER_WIDTH} height={PAPER_HEIGHT} color="rgba(15, 23, 42, 0.12)" />
-                      <Rect x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} color="#fffdf7" />
+                  <Rect x={10} y={12} width={PAPER_WIDTH} height={PAPER_HEIGHT} color="rgba(15, 23, 42, 0.12)" />
+                  <Rect x={0} y={0} width={PAPER_WIDTH} height={PAPER_HEIGHT} color="#fffdf7" />
 
-                      {page.background === "grid"
-                        ? GRID_LINES.map((line, index) => (
-                            <Line
-                              color="#d9e9ef"
-                              key={`grid-${index}`}
-                              opacity={0.75}
-                              p1={{ x: line.x1, y: line.y1 }}
-                              p2={{ x: line.x2, y: line.y2 }}
-                              strokeWidth={1.2}
-                            />
-                          ))
-                        : null}
-                    </>
-                  )}
+                  {page.background === "grid"
+                    ? GRID_LINES.map((line, index) => (
+                        <Line
+                          color="#d9e9ef"
+                          key={`grid-${index}`}
+                          opacity={0.75}
+                          p1={{ x: line.x1, y: line.y1 }}
+                          p2={{ x: line.x2, y: line.y2 }}
+                          strokeWidth={1.2}
+                        />
+                      ))
+                    : null}
 
                   {page.strokes.map((stroke) => (
                     <StrokeLayer key={stroke.id} stroke={stroke} />

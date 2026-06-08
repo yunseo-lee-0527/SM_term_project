@@ -31,6 +31,15 @@ Expo 기반 iPad 필기 실험 프로토타입입니다. 과학적 관리 Term P
   - 필기, 지우기, 도형 삽입, 도형 이동/크기 변경, 이동/확대, 페이지 변경, undo/redo 이벤트 기록
   - 현재 세션 JSON 내보내기
 
+## A/B 실험 구성
+
+세션 시작 시 선택한 조건에 따라 런타임에서 변형(variant)을 전환하는 단일 앱입니다.
+
+- A(베이스라인): 도형 삽입 비활성
+- B(개선): 실험용 도형 삽입 활성
+
+두 조건 모두 동일한 페이지 기반 캔버스를 사용합니다. 기능 플래그는 `src/constants/variant.ts`에서 관리합니다.
+
 ## 실행
 
 의존성 설치:
@@ -88,6 +97,7 @@ src/components/Toolbar.tsx      도구 선택, 색상/굵기, 세션 기록 UI
 src/components/PageStrip.tsx    페이지 전환/추가/삭제
 src/components/SessionSetupModal.tsx
                                 세션 시작 정보 입력
+src/constants/variant.ts        A/B 실험 변형 기능 플래그
 src/lib/notebook.ts             노트북/페이지/히스토리 상태 유틸
 src/lib/geometry.ts             좌표, 지우개, 캔버스 기하 유틸
 src/lib/shapePresets.ts         실험용 도형 프리셋

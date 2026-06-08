@@ -86,48 +86,6 @@ export function clampPointToPaper(point: InkPoint): InkPoint {
   };
 }
 
-// ── Continuous canvas (variant B) ───────────────────────────────────────────
-// An infinite horizontal band: width is unbounded, height stays fixed at
-// PAPER_HEIGHT. The frame fits that fixed height into the stage and left-aligns
-// the page origin; horizontal travel is provided entirely by pan.x.
-export function fitBandToStage(stage: StageSize, margin = 32): PaperFrame {
-  const availableHeight = Math.max(stage.height - margin * 2, 1);
-  const scale = availableHeight / PAPER_HEIGHT;
-  const height = PAPER_HEIGHT * scale;
-
-  return {
-    x: margin,
-    y: (stage.height - height) / 2,
-    width: PAPER_WIDTH * scale, // nominal initial width — not an actual bound
-    height,
-    scale,
-  };
-}
-
-// Continuous canvas only constrains the vertical axis (the band height); x is
-// left free so ink can be placed anywhere along the infinite horizontal strip.
-export function clampPointToBand(point: InkPoint): InkPoint {
-  return {
-    ...point,
-    y: clamp(point.y, 0, PAPER_HEIGHT),
-  };
-}
-
-// Keep the fixed-height band from scrolling off-screen vertically. When the band
-// is shorter than the stage it is centred; otherwise pan.y is clamped to its edges.
-export function clampBandPanY(panY: number, frame: PaperFrame, zoom: number, stage: StageSize) {
-  const scale = frame.scale * zoom;
-  const bandHeight = PAPER_HEIGHT * scale;
-
-  if (bandHeight <= stage.height) {
-    return (stage.height - bandHeight) / 2 - frame.y;
-  }
-
-  const min = stage.height - bandHeight - frame.y;
-  const max = -frame.y;
-  return clamp(panY, min, max);
-}
-
 export function expandStrokePoints(points: InkPoint[], maxGap = 18) {
   if (points.length < 2) {
     return points;
